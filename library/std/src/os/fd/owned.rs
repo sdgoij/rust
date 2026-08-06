@@ -17,7 +17,8 @@ use crate::mem::ManuallyDrop;
     target_env = "sgx",
     target_os = "hermit",
     target_os = "trusty",
-    target_os = "motor"
+    target_os = "motor",
+    target_os = "minix"
 )))]
 use crate::sys::cvt;
 #[cfg(not(target_os = "trusty"))]
@@ -108,7 +109,8 @@ impl BorrowedFd<'_> {
         all(target_arch = "wasm32", not(target_os = "emscripten")),
         target_os = "hermit",
         target_os = "trusty",
-        target_os = "motor"
+        target_os = "motor",
+        target_os = "minix"
     )))]
     #[stable(feature = "io_safety", since = "1.63.0")]
     pub fn try_clone_to_owned(&self) -> io::Result<OwnedFd> {
@@ -149,6 +151,19 @@ impl BorrowedFd<'_> {
     pub fn try_clone_to_owned(&self) -> io::Result<OwnedFd> {
         let fd = moto_rt::fs::duplicate(self.as_raw_fd()).map_err(crate::sys::map_motor_error)?;
         Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    }
+
+    /// Creates a new `OwnedFd` instance that shares the same underlying file
+    /// description as the existing `BorrowedFd` instance.
+    #[cfg(target_os = "minix")]
+    #[stable(feature = "io_safety", since = "1.63.0")]
+    pub fn try_clone_to_owned(&self) -> io::Result<OwnedFd> {
+        let ret = crate::sys::syscall::fcntl(self.as_raw_fd(), crate::sys::syscall::F_DUPFD, 3);
+        if ret < 0 {
+            Err(io::Error::from_raw_os_error(-ret as i32))
+        } else {
+            Ok(unsafe { OwnedFd::from_raw_fd(ret as i32) })
+        }
     }
 }
 
@@ -201,6 +216,12 @@ impl FromRawFd for OwnedFd {
 impl Drop for OwnedFd {
     #[inline]
     fn drop(&mut self) {
+        // Minix's `close` is a safe wrapper around the raw syscall.
+        #[cfg(target_os = "minix")]
+        {
+            let _ = crate::sys::syscall::close(self.fd.as_inner());
+        }
+        #[cfg(not(target_os = "minix"))]
         unsafe {
             // Note that errors are ignored when closing a file descriptor. According to POSIX 2024,
             // we can and indeed should retry `close` on `EINTR`
@@ -346,7 +367,7 @@ impl From<OwnedFd> for fs::File {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl AsFd for crate::net::TcpStream {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
@@ -355,7 +376,7 @@ impl AsFd for crate::net::TcpStream {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl From<crate::net::TcpStream> for OwnedFd {
     /// Takes ownership of a [`TcpStream`](crate::net::TcpStream)'s socket file descriptor.
     #[inline]
@@ -365,7 +386,7 @@ impl From<crate::net::TcpStream> for OwnedFd {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl From<OwnedFd> for crate::net::TcpStream {
     #[inline]
     fn from(owned_fd: OwnedFd) -> Self {
@@ -376,7 +397,7 @@ impl From<OwnedFd> for crate::net::TcpStream {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl AsFd for crate::net::TcpListener {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
@@ -385,7 +406,7 @@ impl AsFd for crate::net::TcpListener {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl From<crate::net::TcpListener> for OwnedFd {
     /// Takes ownership of a [`TcpListener`](crate::net::TcpListener)'s socket file descriptor.
     #[inline]
@@ -395,7 +416,7 @@ impl From<crate::net::TcpListener> for OwnedFd {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl From<OwnedFd> for crate::net::TcpListener {
     #[inline]
     fn from(owned_fd: OwnedFd) -> Self {
@@ -406,7 +427,7 @@ impl From<OwnedFd> for crate::net::TcpListener {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl AsFd for crate::net::UdpSocket {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
@@ -415,7 +436,7 @@ impl AsFd for crate::net::UdpSocket {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl From<crate::net::UdpSocket> for OwnedFd {
     /// Takes ownership of a [`UdpSocket`](crate::net::UdpSocket)'s file descriptor.
     #[inline]
@@ -425,7 +446,7 @@ impl From<crate::net::UdpSocket> for OwnedFd {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl From<OwnedFd> for crate::net::UdpSocket {
     #[inline]
     fn from(owned_fd: OwnedFd) -> Self {
@@ -534,7 +555,7 @@ impl<'a> AsFd for io::StderrLock<'a> {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl AsFd for io::PipeReader {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.0.as_fd()
@@ -542,7 +563,7 @@ impl AsFd for io::PipeReader {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl From<io::PipeReader> for OwnedFd {
     fn from(pipe: io::PipeReader) -> Self {
         pipe.0.into_inner()
@@ -550,7 +571,7 @@ impl From<io::PipeReader> for OwnedFd {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl AsFd for io::PipeWriter {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.0.as_fd()
@@ -558,7 +579,7 @@ impl AsFd for io::PipeWriter {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl From<io::PipeWriter> for OwnedFd {
     fn from(pipe: io::PipeWriter) -> Self {
         pipe.0.into_inner()
@@ -566,7 +587,7 @@ impl From<io::PipeWriter> for OwnedFd {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl From<OwnedFd> for io::PipeReader {
     fn from(owned_fd: OwnedFd) -> Self {
         Self(FromInner::from_inner(owned_fd))
@@ -574,7 +595,7 @@ impl From<OwnedFd> for io::PipeReader {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl From<OwnedFd> for io::PipeWriter {
     fn from(owned_fd: OwnedFd) -> Self {
         Self(FromInner::from_inner(owned_fd))
