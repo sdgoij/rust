@@ -843,8 +843,8 @@ impl Build {
             features.insert("profiler");
         }
 
-        // If zkvm target, generate memcpy, etc.
-        if target.contains("zkvm") {
+        // If zkvm or minix target, generate memcpy, etc.
+        if target.contains("zkvm") || target.contains("minix") {
             features.insert("compiler-builtins-mem");
         }
 

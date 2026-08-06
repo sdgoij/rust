@@ -5,6 +5,7 @@
 #[cfg(any(
     target_family = "unix",
     target_os = "hermit",
+    target_os = "minix",
     target_os = "motor",
     all(target_vendor = "fortanix", target_env = "sgx"),
     target_os = "solid_asp3",
@@ -12,7 +13,7 @@
     target_os = "wasi",
     target_os = "xous",
 ))]
-mod common;
+pub(crate) mod common;
 
 cfg_select! {
     target_family = "unix" => {
@@ -30,6 +31,9 @@ cfg_select! {
     target_os = "motor" => {
         mod motor;
         pub use motor::*;
+    }
+    target_os = "minix" => {
+        pub use crate::sys::pal::minix::env::*;
     }
     all(target_vendor = "fortanix", target_env = "sgx") => {
         mod sgx;

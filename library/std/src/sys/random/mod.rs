@@ -67,6 +67,9 @@ cfg_select! {
         mod motor;
         pub use motor::fill_bytes;
     }
+    target_os = "minix" => {
+        pub use crate::sys::pal::minix::random::{fill_bytes, hashmap_random_keys};
+    }
     all(target_vendor = "fortanix", target_env = "sgx") => {
         mod sgx;
         pub use sgx::fill_bytes;
@@ -121,6 +124,7 @@ cfg_select! {
     target_os = "android",
     all(target_family = "wasm", target_os = "unknown"),
     all(target_os = "wasi", not(target_env = "p1")),
+    target_os = "minix",
     target_os = "xous",
     target_os = "vexos",
 )))]

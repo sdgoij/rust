@@ -47,7 +47,7 @@ const MIN_ALIGN: usize = if cfg!(any(
 };
 
 #[allow(dead_code)]
-unsafe fn realloc_fallback(ptr: *mut u8, old_layout: Layout, new_size: usize) -> *mut u8 {
+pub(crate) unsafe fn realloc_fallback(ptr: *mut u8, old_layout: Layout, new_size: usize) -> *mut u8 {
     // SAFETY: Docs for GlobalAlloc::realloc require this to be valid
     unsafe {
         let new_layout = Layout::from_size_align_unchecked(new_size, old_layout.align());
@@ -84,6 +84,9 @@ cfg_select! {
     target_os = "motor" => {
         mod motor;
         use motor as imp;
+    }
+    target_os = "minix" => {
+        use crate::sys::pal::minix::alloc as imp;
     }
     all(target_vendor = "fortanix", target_env = "sgx") => {
         mod sgx;

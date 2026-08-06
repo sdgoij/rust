@@ -33,6 +33,9 @@ cfg_select! {
         mod motor;
         use motor as imp;
     }
+    target_os = "minix" => {
+        use crate::sys::pal::minix::fs as imp;
+    }
     target_os = "solid_asp3" => {
         mod solid;
         use solid as imp;

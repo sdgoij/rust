@@ -23,6 +23,7 @@ pub(crate) mod linux_uclibc;
 pub(crate) mod linux_wasm;
 pub(crate) mod lynxos178;
 pub(crate) mod managarm_mlibc;
+pub(crate) mod minix;
 pub(crate) mod motor;
 pub(crate) mod msvc;
 pub(crate) mod netbsd;

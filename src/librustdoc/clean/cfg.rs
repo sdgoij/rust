@@ -635,6 +635,7 @@ fn human_readable_target_os(os: Symbol) -> Option<&'static str> {
         LynxOs178 => "LynxOS-178",
         MacOs => "macOS",
         Managarm => "Managarm",
+        Minix => "Minix",
         Motor => "Motor OS",
         NetBsd => "NetBSD",
         None => "bare-metal",

@@ -17,6 +17,14 @@ cfg_select! {
             pub use super::unsupported::{SplitPaths, split_paths, JoinPathsError, join_paths, home_dir};
         }
     }
+    target_os = "minix" => {
+        #[expect(dead_code)]
+        mod unsupported;
+        mod imp {
+            pub use crate::sys::pal::minix::path::{chdir, temp_dir};
+            pub use super::unsupported::{SplitPaths, split_paths, JoinPathsError, join_paths, getcwd, current_exe, home_dir};
+        }
+    }
     all(target_vendor = "fortanix", target_env = "sgx") => {
         mod sgx;
         #[expect(dead_code)]

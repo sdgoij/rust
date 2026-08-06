@@ -20,6 +20,9 @@ mod is_terminal {
             mod motor;
             pub use motor::*;
         }
+        target_os = "minix" => {
+            pub use crate::sys::pal::minix::is_terminal::*;
+        }
         _ => {
             mod unsupported;
             pub use unsupported::*;

@@ -24,6 +24,10 @@ cfg_select! {
         mod motor;
         pub use self::motor::*;
     }
+    target_os = "minix" => {
+        pub(crate) mod minix;
+        pub use self::minix::*;
+    }
     target_os = "trusty" => {
         mod trusty;
         pub use self::trusty::*;

@@ -7,7 +7,7 @@ use hermit_abi as libc;
 #[cfg(target_os = "motor")]
 use moto_rt::libc;
 
-#[cfg(target_os = "motor")]
+#[cfg(any(target_os = "motor", target_os = "minix"))]
 use super::owned::OwnedFd;
 #[cfg(not(target_os = "trusty"))]
 use crate::fs;
@@ -22,8 +22,12 @@ use crate::os::unix::io::AsFd;
 use crate::os::unix::io::OwnedFd;
 #[cfg(target_os = "wasi")]
 use crate::os::wasi::io::OwnedFd;
+#[cfg(all(not(target_os = "trusty"), not(target_os = "minix")))]
+use crate::sys::FromInner;
+#[cfg(target_os = "minix")]
+use crate::sys::syscall as libc;
 #[cfg(not(target_os = "trusty"))]
-use crate::sys::{AsInner, FromInner, IntoInner};
+use crate::sys::{AsInner, IntoInner};
 
 /// Raw file descriptors.
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -290,7 +294,7 @@ impl<T: AsRawFd> AsRawFd for Box<T> {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl AsRawFd for io::PipeReader {
     fn as_raw_fd(&self) -> RawFd {
         self.0.as_raw_fd()
@@ -298,7 +302,7 @@ impl AsRawFd for io::PipeReader {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl FromRawFd for io::PipeReader {
     unsafe fn from_raw_fd(raw_fd: RawFd) -> Self {
         Self::from_inner(unsafe { FromRawFd::from_raw_fd(raw_fd) })
@@ -306,7 +310,7 @@ impl FromRawFd for io::PipeReader {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl IntoRawFd for io::PipeReader {
     fn into_raw_fd(self) -> RawFd {
         self.0.into_raw_fd()
@@ -314,7 +318,7 @@ impl IntoRawFd for io::PipeReader {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl AsRawFd for io::PipeWriter {
     fn as_raw_fd(&self) -> RawFd {
         self.0.as_raw_fd()
@@ -322,7 +326,7 @@ impl AsRawFd for io::PipeWriter {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl FromRawFd for io::PipeWriter {
     unsafe fn from_raw_fd(raw_fd: RawFd) -> Self {
         Self::from_inner(unsafe { FromRawFd::from_raw_fd(raw_fd) })
@@ -330,7 +334,7 @@ impl FromRawFd for io::PipeWriter {
 }
 
 #[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
+#[cfg(not(any(target_os = "trusty", target_os = "minix")))]
 impl IntoRawFd for io::PipeWriter {
     fn into_raw_fd(self) -> RawFd {
         self.0.into_raw_fd()

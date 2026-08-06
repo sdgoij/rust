@@ -6,6 +6,9 @@ cfg_select! {
     target_os = "motor" => {
         use moto_rt::time as imp;
     }
+    target_os = "minix" => {
+        use crate::sys::pal::minix::time as imp;
+    }
     all(target_vendor = "fortanix", target_env = "sgx") => {
         mod sgx;
         use sgx as imp;

@@ -1675,6 +1675,9 @@ supported_targets! {
     ("aarch64-unknown-hermit", aarch64_unknown_hermit),
     ("riscv64gc-unknown-hermit", riscv64gc_unknown_hermit),
     ("x86_64-unknown-hermit", x86_64_unknown_hermit),
+    ("aarch64-unknown-minix", aarch64_unknown_minix),
+    ("riscv64gc-unknown-minix", riscv64gc_unknown_minix),
+    ("x86_64-pc-minix", x86_64_pc_minix),
     ("x86_64-unknown-motor", x86_64_unknown_motor),
 
     ("x86_64-unikraft-linux-musl", x86_64_unikraft_linux_musl),
@@ -1995,6 +1998,7 @@ crate::target_spec_enum! {
         LynxOs178 = "lynxos178",
         MacOs = "macos",
         Managarm = "managarm",
+        Minix = "minix",
         Motor = "motor",
         NetBsd = "netbsd",
         None = "none",

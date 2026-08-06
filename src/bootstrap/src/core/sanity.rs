@@ -33,7 +33,11 @@ pub struct Finder {
 /// Targets can be removed from this list during the usual release process bootstrap compiler bumps,
 /// when the newly-bumped stage 0 compiler now knows about the formerly-missing targets.
 const STAGE0_MISSING_TARGETS: &[&str] = &[
-    // just a dummy comment so the list doesn't get onelined
+    // Targets supported by the in-tree compiler but not yet by the stage0
+    // (bootstrap) compiler.
+    "aarch64-unknown-minix",
+    "riscv64gc-unknown-minix",
+    "x86_64-pc-minix",
 ];
 
 /// Minimum version threshold for libstdc++ required when using prebuilt LLVM
@@ -236,7 +240,7 @@ than building it.
             continue;
         }
 
-        if target.contains("motor") {
+        if target.contains("motor") || target.contains("minix") {
             continue;
         }
 
