@@ -6,7 +6,7 @@ pub struct Env {
 }
 
 impl Env {
-    pub(super) fn new(env: Vec<(OsString, OsString)>) -> Self {
+    pub(crate) fn new(env: Vec<(OsString, OsString)>) -> Self {
         Env { iter: env.into_iter() }
     }
 }

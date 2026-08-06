@@ -15,6 +15,9 @@ cfg_select! {
         mod motor;
         use motor as imp;
     }
+    target_os = "minix" => {
+        use crate::sys::pal::minix::process as imp;
+    }
     _ => {
         mod unsupported;
         use unsupported as imp;
@@ -24,7 +27,7 @@ cfg_select! {
 // This module is shared by all platforms, but nearly all platforms except for
 // the "normal" UNIX ones leave some of this code unused.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-mod env;
+pub(crate) mod env;
 
 pub use env::CommandEnvs;
 #[unstable(feature = "command_resolved_envs", issue = "149070")]

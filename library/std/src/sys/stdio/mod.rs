@@ -17,6 +17,9 @@ cfg_select! {
         mod motor;
         pub use motor::*;
     }
+    target_os = "minix" => {
+        pub use crate::sys::pal::minix::stdio::*;
+    }
     target_os = "solid_asp3" => {
         mod solid;
         pub use solid::*;
