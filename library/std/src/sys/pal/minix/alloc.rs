@@ -1,7 +1,7 @@
 //! Bump allocator backed by the VM server's `brk` call.
 //!
-//! Minix does not support threads yet, so a simple cursor suffices. Memory is
-//! never returned to the kernel; `dealloc` is a no-op and `realloc` falls
+//! Minix has no free-list allocator yet, so a simple cursor suffices. Memory
+//! is never returned to the kernel; `dealloc` is a no-op and `realloc` falls
 //! back to allocate-and-copy.
 
 use crate::alloc::Layout;
@@ -11,7 +11,8 @@ use crate::sync::atomic::{AtomicUsize, Ordering};
 // The brk allocator guarantees 16-byte alignment.
 const MIN_ALIGN: usize = 16;
 
-// Current allocation cursor; 0 means "not yet initialized".
+// High-water mark of the heap; informational (the real break is the
+// authority, see `grow`).
 static CURSOR: AtomicUsize = AtomicUsize::new(0);
 
 #[inline]
@@ -19,34 +20,22 @@ fn align_up(n: usize, align: usize) -> usize {
     (n + align - 1) & !(align - 1)
 }
 
-/// Initialize the cursor to the current program break.
-fn ensure_initialized() -> usize {
-    let cursor = CURSOR.load(Ordering::Relaxed);
-    if cursor != 0 {
-        return cursor;
-    }
-    // `brk(null)` returns the current break.
-    let cur = unsafe { minix_rt::brk(core::ptr::null()) };
-    let cur = if cur < 0 { 0 } else { cur as usize };
-    CURSOR.store(cur, Ordering::Relaxed);
-    cur
-}
-
 fn grow(need: usize) -> *mut u8 {
-    let old = ensure_initialized();
-    let new_brk = old.checked_add(need).unwrap_or(usize::MAX);
-    // SAFETY: `new_brk` is a raw heap address handed to the VM server; it is
-    // never dereferenced here. (The VM protocol passes the break as a 32-bit
-    // value for now.)
-    let r = unsafe { minix_rt::brk(core::ptr::with_exposed_provenance(new_brk)) };
+    // Route through `minix_rt::sbrk`, which serializes the query+reserve
+    // against the other break users (thread stacks, TLS blocks). Doing the
+    // two `brk` calls here directly would race: another thread's `sbrk`
+    // could land between them, making this allocation overlap a live TLS
+    // block or thread stack (the VM treats a `brk` below the real break as
+    // a heap shrink and unmaps the pages).
+    let r = unsafe { minix_rt::sbrk(need as isize) };
     if r < 0 {
         return ptr::null_mut();
     }
-    let actual = r as usize;
-    CURSOR.store(actual, Ordering::Relaxed);
+    let base = r as usize;
+    CURSOR.store(base + need, Ordering::Relaxed);
     // The break address is a plain address returned by the kernel; reattach
     // provenance to it.
-    ptr::with_exposed_provenance_mut(old)
+    ptr::with_exposed_provenance_mut(base)
 }
 
 #[inline]
