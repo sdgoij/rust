@@ -1,4 +1,4 @@
-use crate::spec::{Arch, LlvmAbi, Target, base};
+use crate::spec::{Arch, CodeModel, LlvmAbi, Target, base};
 
 pub(crate) fn target() -> Target {
     let mut base = base::minix::opts();
@@ -6,6 +6,11 @@ pub(crate) fn target() -> Target {
     base.features = "+m,+a,+f,+d,+c".into();
     base.max_atomic_width = Some(64);
     base.llvm_abiname = LlvmAbi::Lp64d;
+    // medany (PC-relative): the kernel image's `.bss` sits >512 KB past the
+    // start of `.text` (the embedded initramfs pushes the layout), and the
+    // default medlow model's absolute `lui` references fail lld's HI20 range
+    // check. Matches the upstream `riscv64gc-unknown-none-elf` spec.
+    base.code_model = Some(CodeModel::Medium);
 
     Target {
         llvm_target: "riscv64-unknown-none-elf".into(),
