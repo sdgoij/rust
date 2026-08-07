@@ -1,109 +1,23 @@
 //! Socket API over the Minix `/dev/tcp` and `/dev/udp` clone-minor devices.
 //!
-//! A socket is an `open("/dev/tcp")` (SOCK_STREAM) or `open("/dev/udp")`
-//! (SOCK_DGRAM) descriptor. `bind`/`connect`/`listen`/`accept` are the
-//! reference `NWIO*` ioctls carrying the `nwio_*` option structs; `send` and
-//! `recv` are plain `write`/`read` on the descriptor (a whole datagram for
-//! UDP, a byte stream for TCP). The wire protocol mirrors
-//! `.refs/minixrs/crates/net/`.
+//! The socket operations (open, bind/connect/listen/accept, send/recv,
+//! shutdown, peer/local addresses) delegate to `minix_std::net`, which
+//! encodes the reference `NWIO*` ioctls and handles the UDP datagram
+//! header protocol. This module only adapts the std-facing
+//! `TcpStream`/`TcpListener`/`UdpSocket` types to the std API.
 
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut};
 use crate::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, ToSocketAddrs};
 use crate::os::fd::FromRawFd;
-use crate::path::Path;
 use crate::sys::fd::FileDesc;
 use crate::sys::net::connection::each_addr;
-use crate::sys::pal::minix::fs::{close, ioctl, open, read, write};
+use crate::sys::pal::minix::fs::{read, write};
 use crate::sys::pal::minix::syscall;
 use crate::sys::unsupported;
 use crate::time::Duration;
 
-// ---- NetBSD-style ioctl request encoding (mirrors `crates/net/src/lib.rs`) ----
-
-const fn ioc_encode(dir: u32, group: u8, num: u8, size: usize) -> u32 {
-    dir | ((size as u32) & 0x1fff) << 16 | ((group as u32) << 8) | (num as u32)
-}
-
-// Socket ioctl request codes (`net/gen/udp_io.h`, `net/gen/tcp_io.h`).
-const NWIOSUDPOPT: u32 = ioc_encode(0x8000_0000, b'n', 64, 16); // set udp opts
-const NWIOSTCPCONF: u32 = ioc_encode(0x8000_0000, b'n', 48, 16); // set tcp conf
-const NWIOGTCPCONF: u32 = ioc_encode(0x4000_0000, b'n', 49, 16); // get tcp conf
-const NWIOTCPCONN: u32 = ioc_encode(0x8000_0000, b'n', 50, 8); // connect
-const NWIOTCPLISTENQ: u32 = ioc_encode(0x8000_0000, b'n', 57, 4); // listen(2)
-const NWIOGTCPCOOKIE: u32 = ioc_encode(0x4000_0000, b'n', 58, 16); // accept cookie
-const NWIOTCPACCEPTTO: u32 = ioc_encode(0x8000_0000, b'n', 59, 16); // accept handoff
-
-// NWUO_* UDP option flags (`net/gen/udp_io.h`).
-const NWUO_LP_SEL: u32 = 0x0004;
-const NWUO_LP_SET: u32 = 0x0008;
-const NWUO_EN_LOC: u32 = 0x0010;
-const NWUO_RP_SET: u32 = 0x0100;
-const NWUO_RA_SET: u32 = 0x0200;
-const NWUO_RWDATONLY: u32 = 0x0000_1000;
-
-// NWTC_* TCP config flags and TCF_* connect flags (`net/gen/tcp_io.h`).
-const NWTC_LP_SEL: u32 = 0x0030;
-const NWTC_LP_SET: u32 = 0x0020;
-const NWTC_SET_RA: u32 = 0x0100;
-const NWTC_SET_RP: u32 = 0x0200;
-const TCF_DEFAULT: u32 = 0;
-
-/// `/dev/udp` option struct (`struct nwio_udpopt`): native-endian, 16 bytes.
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct NwioUdpOpt {
-    nwuo_flags: u32,
-    nwuo_locport: u16,
-    nwuo_remport: u16,
-    nwuo_locaddr: u32,
-    nwuo_remaddr: u32,
-}
-
-/// `/dev/tcp` config struct (`struct nwio_tcpconf`): native-endian, 16 bytes.
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct NwioTcpConf {
-    nwtc_flags: u32,
-    nwtc_locaddr: u32,
-    nwtc_remaddr: u32,
-    nwtc_locport: u16,
-    nwtc_remport: u16,
-}
-
-/// `/dev/tcp` connect struct (`struct nwio_tcpcl`): 8 bytes.
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct NwioTcpCl {
-    nwtcl_flags: u32,
-    nwtcl_ttl: u32,
-}
-
-/// Accept cookie (`struct tcp_cookie`): names a fresh socket to the listener.
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct TcpCookie {
-    tc_ref: u32,
-    tc_secret: [u8; 12],
-}
-
-/// Open a `/dev/tcp` socket descriptor. The local port is auto-assigned at
-/// connect/bind time.
-fn tcp_socket_fd() -> io::Result<i32> {
-    open(Path::new("/dev/tcp"), syscall::O_RDWR, 0)
-}
-
-/// Open a `/dev/udp` socket descriptor and implicitly bind it to an
-/// ephemeral local port on the local address.
-fn udp_socket_fd() -> io::Result<i32> {
-    let fd = open(Path::new("/dev/udp"), syscall::O_RDWR, 0)?;
-    let opt =
-        NwioUdpOpt { nwuo_flags: NWUO_LP_SEL | NWUO_EN_LOC | NWUO_RWDATONLY, ..Default::default() };
-    // SAFETY: `opt` is a valid 16-byte NwioUdpOpt buffer.
-    if let Err(e) = unsafe { ioctl(fd, NWIOSUDPOPT, &opt as *const NwioUdpOpt as *mut u8) } {
-        let _ = close(fd);
-        return Err(e);
-    }
-    Ok(fd)
+fn minix_err(e: minix_std::MinixErr) -> io::Error {
+    io::Error::from_raw_os_error(e.0)
 }
 
 /// Convert a std address to the IPv4 octets Minix uses. IPv6 is not
@@ -121,84 +35,30 @@ fn from_ip_port(ip: [u8; 4], port: u16) -> SocketAddr {
     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from(ip), port))
 }
 
-/// Bind a TCP socket to a local port (INADDR_ANY). A port of 0 asks the net
-/// server for an ephemeral port.
-fn tcp_bind(fd: i32, addr: &SocketAddr) -> io::Result<()> {
-    let _ = to_ip(addr)?;
-    let (flags, locport) =
-        if addr.port() == 0 { (NWTC_LP_SEL, 0) } else { (NWTC_LP_SET, addr.port()) };
-    let conf = NwioTcpConf { nwtc_flags: flags, nwtc_locport: locport, ..Default::default() };
-    // SAFETY: `conf` is a valid 16-byte NwioTcpConf buffer.
-    unsafe { ioctl(fd, NWIOSTCPCONF, &conf as *const NwioTcpConf as *mut u8) }.map(drop)
+fn to_sockaddr(a: minix_std::net::SocketAddr) -> SocketAddr {
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from(a.ip), a.port))
 }
 
-/// Put a bound TCP socket into the listening state.
-fn tcp_listen(fd: i32, backlog: i32) -> io::Result<()> {
-    // SAFETY: `backlog` is a valid 4-byte i32 buffer.
-    unsafe { ioctl(fd, NWIOTCPLISTENQ, &backlog as *const i32 as *mut u8) }.map(drop)
+/// Open a `/dev/tcp` socket descriptor. The local port is auto-assigned at
+/// connect/bind time.
+fn tcp_socket_fd() -> io::Result<i32> {
+    minix_std::net::tcp_socket().map_err(minix_err)
 }
 
-/// Run the three-way handshake: set the remote address/port (auto local
-/// port), then block until established.
-fn tcp_connect(fd: i32, addr: &SocketAddr) -> io::Result<()> {
-    let ip = to_ip(addr)?;
-    let conf = NwioTcpConf {
-        nwtc_flags: NWTC_LP_SEL | NWTC_SET_RA | NWTC_SET_RP,
-        nwtc_remaddr: u32::from_be_bytes(ip),
-        nwtc_remport: addr.port(),
-        ..Default::default()
-    };
-    // SAFETY: `conf` is a valid 16-byte NwioTcpConf buffer.
-    unsafe { ioctl(fd, NWIOSTCPCONF, &conf as *const NwioTcpConf as *mut u8) }?;
-    let cl = NwioTcpCl { nwtcl_flags: TCF_DEFAULT, nwtcl_ttl: 0 };
-    // SAFETY: `cl` is a valid 8-byte NwioTcpCl buffer.
-    unsafe { ioctl(fd, NWIOTCPCONN, &cl as *const NwioTcpCl as *mut u8) }.map(drop)
-}
-
-/// Bind a UDP socket to a local address/port (a port of 0 is ephemeral).
-fn udp_bind(fd: i32, addr: &SocketAddr) -> io::Result<()> {
-    let ip = to_ip(addr)?;
-    let (flags, locport) =
-        if addr.port() == 0 { (NWUO_LP_SEL, 0) } else { (NWUO_LP_SET, addr.port()) };
-    let opt = NwioUdpOpt {
-        nwuo_flags: flags | NWUO_EN_LOC | NWUO_RWDATONLY,
-        nwuo_locport: locport,
-        nwuo_locaddr: u32::from_be_bytes(ip),
-        ..Default::default()
-    };
-    // SAFETY: `opt` is a valid 16-byte NwioUdpOpt buffer.
-    unsafe { ioctl(fd, NWIOSUDPOPT, &opt as *const NwioUdpOpt as *mut u8) }.map(drop)
-}
-
-/// Set the default destination and the receive filter of a UDP socket.
-fn udp_connect(fd: i32, addr: &SocketAddr) -> io::Result<()> {
-    let ip = to_ip(addr)?;
-    let opt = NwioUdpOpt {
-        nwuo_flags: NWUO_RP_SET | NWUO_RA_SET | NWUO_RWDATONLY,
-        nwuo_remport: addr.port(),
-        nwuo_remaddr: u32::from_be_bytes(ip),
-        ..Default::default()
-    };
-    // SAFETY: `opt` is a valid 16-byte NwioUdpOpt buffer.
-    unsafe { ioctl(fd, NWIOSUDPOPT, &opt as *const NwioUdpOpt as *mut u8) }.map(drop)
-}
-
-/// Read the current TCP configuration (`NWIOGTCPCONF`).
-fn tcp_conf(fd: i32) -> io::Result<NwioTcpConf> {
-    let mut conf = NwioTcpConf::default();
-    // SAFETY: `conf` is a valid 16-byte NwioTcpConf buffer.
-    unsafe { ioctl(fd, NWIOGTCPCONF, &mut conf as *mut NwioTcpConf as *mut u8) }?;
-    Ok(conf)
+/// Open a `/dev/udp` socket descriptor and implicitly bind it to an
+/// ephemeral local port on the local address.
+fn udp_socket_fd() -> io::Result<i32> {
+    minix_std::net::udp_socket().map_err(minix_err)
 }
 
 fn peer_addr(fd: i32) -> io::Result<SocketAddr> {
-    let conf = tcp_conf(fd)?;
-    Ok(from_ip_port(u32::to_be_bytes(conf.nwtc_remaddr), conf.nwtc_remport))
+    let (ip, port) = minix_std::net::getpeername(fd).map_err(minix_err)?;
+    Ok(from_ip_port(ip, port))
 }
 
 fn socket_addr(fd: i32) -> io::Result<SocketAddr> {
-    let conf = tcp_conf(fd)?;
-    Ok(from_ip_port(u32::to_be_bytes(conf.nwtc_locaddr), conf.nwtc_locport))
+    let (ip, port) = minix_std::net::getsockname(fd).map_err(minix_err)?;
+    Ok(from_ip_port(ip, port))
 }
 
 /// Duplicate a descriptor (`F_DUPFD`).
@@ -211,29 +71,11 @@ fn duplicate(fd: i32) -> io::Result<FileDesc> {
     }
 }
 
-/// Accept the next pending connection: open a fresh `/dev/tcp` fd, obtain
-/// its accept cookie, and transfer the pending connection to it. Blocks
-/// (retrying EAGAIN, which the net server returns when its bounded accept
-/// poll expires) until a connection arrives.
+/// Accept the next pending connection (`minix_std::net::accept` retries the
+/// EAGAIN the net server returns when its bounded accept poll expires).
 fn accept(fd: i32) -> io::Result<FileDesc> {
-    let s1 = tcp_socket_fd()?;
-    let mut cookie = TcpCookie::default();
-    // SAFETY: `cookie` is a valid 16-byte TcpCookie buffer.
-    if let Err(e) = unsafe { ioctl(s1, NWIOGTCPCOOKIE, &mut cookie as *mut TcpCookie as *mut u8) } {
-        let _ = close(s1);
-        return Err(e);
-    }
-    loop {
-        // SAFETY: `cookie` is a valid 16-byte TcpCookie buffer.
-        match unsafe { ioctl(fd, NWIOTCPACCEPTTO, &cookie as *const TcpCookie as *mut u8) } {
-            Ok(_) => return Ok(unsafe { FileDesc::from_raw_fd(s1) }),
-            Err(e) if e.raw_os_error() == Some(syscall::EAGAIN) => continue,
-            Err(e) => {
-                let _ = close(s1);
-                return Err(e);
-            }
-        }
-    }
+    let newfd = minix_std::net::accept(fd).map_err(minix_err)?;
+    Ok(unsafe { FileDesc::from_raw_fd(newfd) })
 }
 
 /// Bound retries when the net server's bounded RX poll reports "no data"
@@ -289,11 +131,12 @@ impl TcpStream {
     pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
         each_addr(addr, |addr| {
             let fd = tcp_socket_fd()?;
-            match tcp_connect(fd, addr) {
+            let ip = to_ip(addr)?;
+            match minix_std::net::connect(fd, ip, addr.port()) {
                 Ok(()) => Ok(TcpStream { inner: unsafe { FileDesc::from_raw_fd(fd) } }),
                 Err(e) => {
-                    let _ = close(fd);
-                    Err(e)
+                    let _ = minix_std::net::close(fd);
+                    Err(minix_err(e))
                 }
             }
         })
@@ -301,11 +144,12 @@ impl TcpStream {
 
     pub fn connect_timeout(addr: &SocketAddr, _timeout: Duration) -> io::Result<TcpStream> {
         let fd = tcp_socket_fd()?;
-        match tcp_connect(fd, addr) {
+        let ip = to_ip(addr)?;
+        match minix_std::net::connect(fd, ip, addr.port()) {
             Ok(()) => Ok(TcpStream { inner: unsafe { FileDesc::from_raw_fd(fd) } }),
             Err(e) => {
-                let _ = close(fd);
-                Err(e)
+                let _ = minix_std::net::close(fd);
+                Err(minix_err(e))
             }
         }
     }
@@ -376,8 +220,13 @@ impl TcpStream {
         socket_addr(self.inner.as_raw_fd())
     }
 
-    pub fn shutdown(&self, _how: Shutdown) -> io::Result<()> {
-        unsupported()
+    pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
+        let how = match how {
+            Shutdown::Read => minix_std::net::SHUT_RD,
+            Shutdown::Write => minix_std::net::SHUT_WR,
+            Shutdown::Both => minix_std::net::SHUT_RDWR,
+        };
+        minix_std::net::shutdown(self.inner.as_raw_fd(), how).map_err(minix_err)
     }
 
     pub fn duplicate(&self) -> io::Result<TcpStream> {
@@ -434,11 +283,14 @@ impl TcpListener {
     pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListener> {
         each_addr(addr, |addr| {
             let fd = tcp_socket_fd()?;
-            match tcp_bind(fd, addr).and_then(|()| tcp_listen(fd, 128)) {
+            let ip = to_ip(addr)?;
+            let r = minix_std::net::bind(fd, ip, addr.port())
+                .and_then(|()| minix_std::net::listen(fd, 128));
+            match r {
                 Ok(()) => Ok(TcpListener { inner: unsafe { FileDesc::from_raw_fd(fd) } }),
                 Err(e) => {
-                    let _ = close(fd);
-                    Err(e)
+                    let _ = minix_std::net::close(fd);
+                    Err(minix_err(e))
                 }
             }
         })
@@ -495,11 +347,12 @@ impl UdpSocket {
     pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<UdpSocket> {
         each_addr(addr, |addr| {
             let fd = udp_socket_fd()?;
-            match udp_bind(fd, addr) {
+            let ip = to_ip(addr)?;
+            match minix_std::net::bind(fd, ip, addr.port()) {
                 Ok(()) => Ok(UdpSocket { inner: unsafe { FileDesc::from_raw_fd(fd) } }),
                 Err(e) => {
-                    let _ = close(fd);
-                    Err(e)
+                    let _ = minix_std::net::close(fd);
+                    Err(minix_err(e))
                 }
             }
         })
@@ -513,16 +366,24 @@ impl UdpSocket {
         unsupported()
     }
 
-    pub fn recv_from(&self, _buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-        unsupported()
+    pub fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        // SAFETY: `buf` is a valid mutable byte slice.
+        let (n, addr) =
+            unsafe { minix_std::net::recvfrom(self.inner.as_raw_fd(), buf) }.map_err(minix_err)?;
+        Ok((n as usize, to_sockaddr(addr)))
     }
 
     pub fn peek_from(&self, _buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
         unsupported()
     }
 
-    pub fn send_to(&self, _buf: &[u8], _addr: &SocketAddr) -> io::Result<usize> {
-        unsupported()
+    pub fn send_to(&self, buf: &[u8], addr: &SocketAddr) -> io::Result<usize> {
+        let ip = to_ip(addr)?;
+        let dest = minix_std::net::SocketAddr::new(ip, addr.port());
+        // SAFETY: `buf` is a valid byte slice.
+        let n = unsafe { minix_std::net::sendto(self.inner.as_raw_fd(), buf, Some(dest)) }
+            .map_err(minix_err)?;
+        Ok(n as usize)
     }
 
     pub fn duplicate(&self) -> io::Result<UdpSocket> {
@@ -610,7 +471,10 @@ impl UdpSocket {
     }
 
     pub fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
-        read(self.inner.as_raw_fd(), buf)
+        // SAFETY: `buf` is a valid mutable byte slice.
+        let (n, _) =
+            unsafe { minix_std::net::recvfrom(self.inner.as_raw_fd(), buf) }.map_err(minix_err)?;
+        Ok(n as usize)
     }
 
     pub fn peek(&self, _buf: &mut [u8]) -> io::Result<usize> {
@@ -618,11 +482,17 @@ impl UdpSocket {
     }
 
     pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
-        write(self.inner.as_raw_fd(), buf)
+        // SAFETY: `buf` is a valid byte slice.
+        let n = unsafe { minix_std::net::sendto(self.inner.as_raw_fd(), buf, None) }
+            .map_err(minix_err)?;
+        Ok(n as usize)
     }
 
     pub fn connect<A: ToSocketAddrs>(&self, addr: A) -> io::Result<()> {
-        each_addr(addr, |addr| udp_connect(self.inner.as_raw_fd(), addr))
+        each_addr(addr, |addr| {
+            let ip = to_ip(addr)?;
+            minix_std::net::connect(self.inner.as_raw_fd(), ip, addr.port()).map_err(minix_err)
+        })
     }
 }
 
