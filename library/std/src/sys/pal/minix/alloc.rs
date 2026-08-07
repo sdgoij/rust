@@ -7,7 +7,6 @@
 use crate::alloc::Layout;
 use crate::ptr;
 use crate::sync::atomic::{AtomicUsize, Ordering};
-use crate::sys::syscall;
 
 // The brk allocator guarantees 16-byte alignment.
 const MIN_ALIGN: usize = 16;
@@ -26,8 +25,8 @@ fn ensure_initialized() -> usize {
     if cursor != 0 {
         return cursor;
     }
-    // `brk(0)` returns the current break.
-    let cur = syscall::brk(0);
+    // `brk(null)` returns the current break.
+    let cur = unsafe { minix_rt::brk(core::ptr::null()) };
     let cur = if cur < 0 { 0 } else { cur as usize };
     CURSOR.store(cur, Ordering::Relaxed);
     cur
@@ -36,8 +35,10 @@ fn ensure_initialized() -> usize {
 fn grow(need: usize) -> *mut u8 {
     let old = ensure_initialized();
     let new_brk = old.checked_add(need).unwrap_or(usize::MAX);
-    // The VM server protocol passes the break as a 32-bit value for now.
-    let r = syscall::brk(new_brk as u32);
+    // SAFETY: `new_brk` is a raw heap address handed to the VM server; it is
+    // never dereferenced here. (The VM protocol passes the break as a 32-bit
+    // value for now.)
+    let r = unsafe { minix_rt::brk(core::ptr::with_exposed_provenance(new_brk)) };
     if r < 0 {
         return ptr::null_mut();
     }

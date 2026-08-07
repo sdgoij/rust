@@ -170,6 +170,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "minix-rt"
+version = "0.1.0"
+dependencies = [
+ "compiler_builtins",
+ "core",
+]
+
+[[package]]
+name = "minix-std"
+version = "0.1.0"
+dependencies = [
+ "compiler_builtins",
+ "core",
+ "minix-rt",
+ "net",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -188,6 +206,14 @@ checksum = "9f3c01b588c6d37e3f4f065712c4f33e12fad17ad4152a70e8346991e2bbe92e"
 dependencies = [
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
+]
+
+[[package]]
+name = "net"
+version = "0.1.0"
+dependencies = [
+ "compiler_builtins",
+ "core",
 ]
 
 [[package]]
@@ -338,6 +364,8 @@ dependencies = [
  "hashbrown",
  "hermit-abi",
  "libc",
+ "minix-rt",
+ "minix-std",
  "miniz_oxide",
  "moto-rt",
  "object",
