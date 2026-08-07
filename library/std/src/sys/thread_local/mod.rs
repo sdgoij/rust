@@ -29,7 +29,6 @@ cfg_select! {
         target_os = "uefi",
         target_os = "zkvm",
         target_os = "trusty",
-        target_os = "minix",
         target_os = "vexos",
     ) => {
         mod no_threads;

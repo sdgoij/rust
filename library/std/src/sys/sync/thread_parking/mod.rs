@@ -10,6 +10,7 @@ cfg_select! {
         target_os = "fuchsia",
         target_os = "motor",
         target_os = "hermit",
+        target_os = "minix",
         all(target_os = "wasi", target_env = "p3"),
     ) => {
         mod futex;
