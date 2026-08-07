@@ -3,7 +3,6 @@
 //! `Instant` is backed by `CLOCK_MONOTONIC`, `SystemTime` by
 //! `CLOCK_REALTIME` (seconds since the Unix epoch).
 
-use crate::sys::syscall;
 use crate::time::Duration;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -15,27 +14,15 @@ pub struct SystemTime(Duration);
 pub const UNIX_EPOCH: SystemTime = SystemTime(Duration::from_secs(0));
 
 fn clock_gettime(clock_id: i32) -> Duration {
-    let mut msg = [0u8; 64];
-    // PM_CLOCK_GETTIME (34) uses the C `mess_lc_pm_time` layout: m_type@4,
-    // clk_id @ payload 8 (message byte 16). The reply `mess_pm_lc_time` puts
-    // sec @ payload 0 (message byte 8), nsec @ payload 8 (byte 16); the
-    // payload starts at message byte 8 (`m_source` + `m_type`).
-    syscall::msg_set_i32(&mut msg, 4, syscall::PM_CLOCK_GETTIME);
-    syscall::msg_set_i32(&mut msg, 16, clock_id);
-    // SAFETY: `msg` is a valid message buffer.
-    match unsafe { syscall::pm_call(&mut msg) } {
-        Ok(_) => {
-            let sec = syscall::msg_i64(&msg, 8);
-            let nsec = syscall::msg_i64(&msg, 16);
-            Duration::new(sec.max(0) as u64, nsec.max(0) as u32)
-        }
+    match minix_std::time::clock_gettime(clock_id) {
+        Ok(ts) => Duration::new(ts.tv_sec.max(0) as u64, ts.tv_nsec.max(0) as u32),
         Err(_) => panic!("clock_gettime failed"),
     }
 }
 
 impl Instant {
     pub fn now() -> Instant {
-        Instant(clock_gettime(syscall::CLOCK_MONOTONIC))
+        Instant(clock_gettime(minix_std::time::CLOCK_MONOTONIC))
     }
 
     pub fn checked_sub_instant(&self, other: &Instant) -> Option<Duration> {
@@ -57,7 +44,7 @@ impl SystemTime {
     pub const MIN: SystemTime = SystemTime(Duration::ZERO);
 
     pub fn now() -> SystemTime {
-        SystemTime(clock_gettime(syscall::CLOCK_REALTIME))
+        SystemTime(clock_gettime(minix_std::time::CLOCK_REALTIME))
     }
 
     pub fn from_secs(secs: u64) -> SystemTime {

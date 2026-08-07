@@ -78,6 +78,14 @@ hermit-abi = { version = "0.5.0", features = [
     'rustc-dep-of-std',
 ], public = true }
 
+[target.'cfg(target_os = "minix")'.dependencies]
+# Fork-local path deps: the Minix userspace syscall/IPC layer lives in the
+# minixrs workspace (`crates/minix-rt`, `crates/minix-std`), not on crates.io.
+# `minix-rt` is built without its default `rt` feature: `std` provides its own
+# `_start`, panic runtime and global allocator.
+minix-rt = { path = "../../../crates/minix-rt", default-features = false, features = ["rustc-dep-of-std"], public = true }
+minix-std = { path = "../../../crates/minix-std", features = ["rustc-dep-of-std"], public = true }
+
 [target.'cfg(all(target_os = "wasi", target_env = "p1"))'.dependencies]
 wasip1 = { version = "1.0.0", features = [
     'rustc-dep-of-std',

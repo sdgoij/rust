@@ -1,9 +1,9 @@
 //! Process lifecycle: fork/exec/wait over the PM protocol.
 //!
 //! `Command::spawn` forks and execs like the reference shell does: PM_FORK,
-//! child-side `dup2`/`chdir`, then a PM_EXEC frame built with the program,
-//! argv and the captured environment. `wait`/`try_wait` go through
-//! PM_WAITPID; `kill` through PM_KILL (SIGKILL).
+//! child-side `dup2`/`chdir`, then `minix_rt::execve` with NUL-terminated
+//! argv/envp arrays. `wait`/`try_wait` go through PM_WAITPID; `kill` through
+//! PM_KILL (SIGKILL).
 
 pub use crate::ffi::OsString as EnvKey;
 use crate::ffi::{OsStr, OsString};
@@ -126,8 +126,9 @@ impl Command {
         let stdout = prepare(stdout, false)?;
         let stderr = prepare(stderr, false)?;
 
-        // Resolve the program path and build the exec frame before forking,
-        // so the child only runs syscalls.
+        // Resolve the program path and build the argv/envp pointer arrays
+        // before forking, so the child only runs syscalls. `minix_rt::execve`
+        // requires NUL-terminated arrays of NUL-terminated strings.
         let program = self.program.as_encoded_bytes();
         let has_slash = program.contains(&b'/');
         let mut path = Vec::new();
@@ -145,22 +146,29 @@ impl Command {
             alt_path.push(0);
         }
 
-        let mut argv: Vec<&[u8]> = Vec::new();
-        argv.push(&path[..path.len() - 1]);
+        let mut argv_owned: Vec<Vec<u8>> = Vec::new();
+        let mut argv0 = path[..path.len() - 1].to_vec();
+        argv0.push(0);
+        argv_owned.push(argv0);
         for arg in &self.args[1..] {
-            argv.push(arg.as_encoded_bytes());
+            let mut entry = arg.as_encoded_bytes().to_vec();
+            entry.push(0);
+            argv_owned.push(entry);
         }
+        let mut argv_ptrs: Vec<*const u8> = argv_owned.iter().map(|s| s.as_ptr()).collect();
+        argv_ptrs.push(core::ptr::null());
 
         let env = self.env.capture();
-        let mut envp: Vec<Vec<u8>> = Vec::new();
+        let mut envp_owned: Vec<Vec<u8>> = Vec::new();
         for (key, value) in &env {
             let mut entry = key.as_encoded_bytes().to_vec();
             entry.push(b'=');
             entry.extend_from_slice(value.as_encoded_bytes());
-            envp.push(entry);
+            entry.push(0);
+            envp_owned.push(entry);
         }
-        let envp: Vec<&[u8]> = envp.iter().map(|entry| entry.as_slice()).collect();
-        let frame = build_exec_frame(&argv, &envp)?;
+        let mut envp_ptrs: Vec<*const u8> = envp_owned.iter().map(|s| s.as_ptr()).collect();
+        envp_ptrs.push(core::ptr::null());
 
         let pid = syscall::fork();
         if pid < 0 {
@@ -168,7 +176,16 @@ impl Command {
             return Err(errno_of(pid));
         }
         if pid == 0 {
-            child_exec(&stdin, &stdout, &stderr, &path, &alt_path, &frame, self.cwd.as_deref());
+            child_exec(
+                &stdin,
+                &stdout,
+                &stderr,
+                &path,
+                &alt_path,
+                argv_ptrs.as_ptr(),
+                envp_ptrs.as_ptr(),
+                self.cwd.as_deref(),
+            );
         }
 
         // Parent: close the child's ends first (the parent keeps only its
@@ -266,69 +283,6 @@ fn cleanup_prepared(stdin: &Prepared, stdout: &Prepared, stderr: &Prepared) {
     }
 }
 
-/// Build the exec stack frame: argc, argv pointers, NULL, envp pointers,
-/// NULL, then the NUL-terminated strings (the layout the kernel's
-/// `parse_exec_frame` expects, mirroring `minix-rt::execve`).
-fn build_exec_frame(argv: &[&[u8]], envp: &[&[u8]]) -> io::Result<Vec<u8>> {
-    const EXEC_FRAME_MAX: usize = 16384;
-    const MAX_STRINGS: usize = 63;
-
-    let argc = argv.len().min(MAX_STRINGS);
-    let envc = envp.len().min(MAX_STRINGS);
-    let mut str_bytes = 0usize;
-    for arg in argv.iter().take(argc) {
-        str_bytes += arg.len() + 1;
-    }
-    for entry in envp.iter().take(envc) {
-        str_bytes += entry.len() + 1;
-    }
-    let header = 8 + (argc + envc + 2) * 8;
-    let frame_size = (header + str_bytes + 7) & !7;
-    if frame_size > EXEC_FRAME_MAX {
-        return Err(io::const_error!(io::ErrorKind::InvalidInput, "arg list too long"));
-    }
-
-    let vsp = syscall::USER_STACK_TOP - frame_size as u64;
-    let mut frame = vec![0u8; frame_size];
-
-    // Strings at the end of the frame, going down: argv then envp.
-    let mut str_pos = frame_size;
-    let mut offsets = [0usize; 128];
-    let mut oi = 0usize;
-    for arg in argv.iter().take(argc) {
-        str_pos -= arg.len() + 1;
-        frame[str_pos..str_pos + arg.len()].copy_from_slice(arg);
-        offsets[oi] = str_pos;
-        oi += 1;
-    }
-    for entry in envp.iter().take(envc) {
-        str_pos -= entry.len() + 1;
-        frame[str_pos..str_pos + entry.len()].copy_from_slice(entry);
-        offsets[oi] = str_pos;
-        oi += 1;
-    }
-
-    // Pointer array: argc, argv ptrs, NULL, envp ptrs, NULL.
-    let mut pos = 0usize;
-    let put = |frame: &mut [u8], pos: usize, value: u64| {
-        frame[pos..pos + 8].copy_from_slice(&value.to_le_bytes());
-    };
-    put(&mut frame, pos, argc as u64);
-    pos += 8;
-    for i in 0..argc {
-        put(&mut frame, pos, vsp + offsets[i] as u64);
-        pos += 8;
-    }
-    put(&mut frame, pos, 0);
-    pos += 8;
-    for i in 0..envc {
-        put(&mut frame, pos, vsp + offsets[argc + i] as u64);
-        pos += 8;
-    }
-    put(&mut frame, pos, 0);
-    Ok(frame)
-}
-
 /// Child-side exec: wire the prepared fds onto 0/1/2, apply the cwd, then
 /// exec the resolved path (with an `/sbin/` fallback). Never returns.
 fn child_exec(
@@ -337,7 +291,8 @@ fn child_exec(
     stderr: &Prepared,
     path: &[u8],
     alt_path: &[u8],
-    frame: &[u8],
+    argv: *const *const u8,
+    envp: *const *const u8,
     cwd: Option<&OsStr>,
 ) -> ! {
     for (prep, slot) in [(stdin, 0), (stdout, 1), (stderr, 2)] {
@@ -359,14 +314,13 @@ fn child_exec(
         }
     }
 
-    // SAFETY: `path` is NUL-terminated and `frame` is a valid exec frame;
-    // both stay alive for the duration of the PM_EXEC call.
-    let r = unsafe { syscall::execve(path.as_ptr(), path.len(), frame.as_ptr(), frame.len()) };
+    // SAFETY: `path` is NUL-terminated and `argv`/`envp` are NUL-terminated
+    // arrays of NUL-terminated strings; all stay alive for the duration of
+    // the call.
+    let r = unsafe { minix_rt::execve(path.as_ptr(), path.len(), argv, envp) };
     if r < 0 && !alt_path.is_empty() {
         // Try /sbin/<prog> as fallback (matching the shell).
-        let _ = unsafe {
-            syscall::execve(alt_path.as_ptr(), alt_path.len(), frame.as_ptr(), frame.len())
-        };
+        let _ = unsafe { minix_rt::execve(alt_path.as_ptr(), alt_path.len(), argv, envp) };
     }
     syscall::exit(1);
 }

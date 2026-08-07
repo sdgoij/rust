@@ -395,127 +395,44 @@ impl OpenOptions {
     }
 }
 
-fn errno_of(ret: i32) -> io::Error {
-    io::Error::from_raw_os_error(-ret)
+fn minix_err(e: minix_std::MinixErr) -> io::Error {
+    io::Error::from_raw_os_error(e.0)
 }
 
-fn cvt(ret: i64) -> io::Result<i64> {
-    if ret < 0 { Err(errno_of(ret as i32)) } else { Ok(ret) }
-}
-
-// Raw VFS helpers (message layouts match `servers/vfs/call.rs`).
-
-unsafe fn vfs_call(msg: &mut [u8; 64]) -> io::Result<i32> {
-    // SAFETY: `msg` is a valid 64-byte buffer owned by the caller.
-    unsafe { syscall::vfs_call(msg).map_err(errno_of) }
-}
+// Raw VFS helpers — delegated to `minix_std::fs`, the single source of truth
+// for the message layouts.
 
 pub(crate) fn open(path: &Path, flags: i32, mode: u32) -> io::Result<i32> {
     let bytes = path.as_os_str().as_encoded_bytes();
-    let mut msg = [0u8; 64];
-    if flags & syscall::O_CREAT != 0 {
-        // VFS_CREAT: path@8, len@16, flags@24, mode@28.
-        syscall::msg_set_i32(&mut msg, 4, syscall::VFS_CREAT);
-        syscall::msg_set_u64(&mut msg, 8, bytes.as_ptr().addr() as u64);
-        syscall::msg_set_i32(&mut msg, 16, bytes.len() as i32);
-        syscall::msg_set_i32(&mut msg, 24, flags);
-        syscall::msg_set_i32(&mut msg, 28, mode as i32);
-    } else {
-        // VFS_OPEN: flags@8, path@16, len@24.
-        syscall::msg_set_i32(&mut msg, 4, syscall::VFS_OPEN);
-        syscall::msg_set_i32(&mut msg, 8, flags);
-        syscall::msg_set_u64(&mut msg, 16, bytes.as_ptr().addr() as u64);
-        syscall::msg_set_i32(&mut msg, 24, bytes.len() as i32);
-    }
-    // SAFETY: `msg` is a valid message buffer.
-    let fd = unsafe { vfs_call(&mut msg) }?;
-    Ok(fd)
+    // SAFETY: `bytes` is a valid byte slice in the caller's address space.
+    unsafe { minix_std::fs::open(bytes, flags, mode).map_err(minix_err) }
 }
 
 pub(crate) fn close(fd: i32) -> io::Result<()> {
-    let mut msg = [0u8; 64];
-    syscall::msg_set_i32(&mut msg, 4, syscall::VFS_CLOSE);
-    syscall::msg_set_i32(&mut msg, 8, fd);
-    // SAFETY: `msg` is a valid message buffer.
-    unsafe { vfs_call(&mut msg) }?;
-    Ok(())
+    minix_std::fs::close(fd).map_err(minix_err)
 }
 
 pub(crate) fn read(fd: i32, buf: &mut [u8]) -> io::Result<usize> {
-    let mut msg = [0u8; 64];
-    syscall::msg_set_i32(&mut msg, 4, syscall::VFS_READ);
-    syscall::msg_set_i32(&mut msg, 8, fd);
-    syscall::msg_set_u64(&mut msg, 16, buf.as_mut_ptr().addr() as u64);
-    syscall::msg_set_u64(&mut msg, 24, buf.len() as u64);
-    // SAFETY: `msg` is a valid message buffer.
-    let n = unsafe { vfs_call(&mut msg) }?;
-    Ok(n as usize)
+    // SAFETY: `buf` is a valid mutable byte slice in the caller's address
+    // space.
+    unsafe { minix_std::fs::read(fd, buf).map(|n| n as usize).map_err(minix_err) }
 }
 
 pub(crate) fn write(fd: i32, buf: &[u8]) -> io::Result<usize> {
-    let mut msg = [0u8; 64];
-    syscall::msg_set_i32(&mut msg, 4, syscall::VFS_WRITE);
-    syscall::msg_set_i32(&mut msg, 8, fd);
-    syscall::msg_set_u64(&mut msg, 16, buf.as_ptr().addr() as u64);
-    syscall::msg_set_u64(&mut msg, 24, buf.len() as u64);
-    // SAFETY: `msg` is a valid message buffer.
-    let n = unsafe { vfs_call(&mut msg) }?;
-    Ok(n as usize)
+    // SAFETY: `buf` is a valid byte slice in the caller's address space.
+    unsafe { minix_std::fs::write(fd, buf).map(|n| n as usize).map_err(minix_err) }
 }
 
 fn lseek(fd: i32, offset: i64, whence: i32) -> io::Result<u64> {
-    let mut msg = [0u8; 64];
-    syscall::msg_set_i32(&mut msg, 4, syscall::VFS_LSEEK);
-    syscall::msg_set_i32(&mut msg, 8, fd);
-    syscall::msg_set_i64(&mut msg, 12, offset);
-    syscall::msg_set_i32(&mut msg, 20, whence);
-    // SAFETY: `msg` is a valid message buffer.
-    let pos = unsafe { vfs_call(&mut msg) }?;
-    Ok(pos as u64)
+    minix_std::fs::lseek(fd, offset, whence).map(|p| p as u64).map_err(minix_err)
 }
 
 fn getdents(fd: i32, buf: &mut [u8]) -> io::Result<usize> {
-    let mut msg = [0u8; 64];
-    syscall::msg_set_i32(&mut msg, 4, syscall::VFS_GETDENTS);
-    syscall::msg_set_i32(&mut msg, 8, fd);
-    syscall::msg_set_u64(&mut msg, 16, buf.as_mut_ptr().addr() as u64);
-    syscall::msg_set_u64(&mut msg, 24, buf.len() as u64);
-    // SAFETY: `msg` is a valid message buffer.
-    let n = unsafe { vfs_call(&mut msg) }?;
-    Ok(n as usize)
+    minix_std::fs::getdents(fd, buf).map(|n| n as usize).map_err(minix_err)
 }
 
 fn fstat(fd: i32) -> io::Result<syscall::Stat> {
-    let mut stat_buf = core::mem::MaybeUninit::<syscall::Stat>::zeroed();
-    let mut msg = [0u8; 64];
-    syscall::msg_set_i32(&mut msg, 4, syscall::VFS_FSTAT);
-    syscall::msg_set_i32(&mut msg, 8, fd);
-    syscall::msg_set_u64(&mut msg, 12, stat_buf.as_mut_ptr().addr() as u64);
-    // SAFETY: `msg` is a valid message buffer.
-    unsafe { vfs_call(&mut msg) }?;
-    // SAFETY: zero-initialized, so `assume_init` is safe even if the server
-    // did not fill the buffer.
-    Ok(unsafe { stat_buf.assume_init() })
-}
-
-/// Perform the `ioctl(fd, request, arg)` system call. `request` is a
-/// NetBSD-style `_IOW`/`_IOR` code (see `crates/net` in the minixrs
-/// repository); VFS copies `ioc_size(request)` bytes between `arg` and the
-/// target device driver.
-///
-/// Returns the ioctl result (0 for the NWIO* socket ioctls) or an error.
-///
-/// # Safety
-///
-/// `arg` must point to a buffer of at least `ioc_size(request)` bytes.
-pub(crate) unsafe fn ioctl(fd: i32, request: u32, arg: *mut u8) -> io::Result<i32> {
-    let mut msg = [0u8; 64];
-    syscall::msg_set_i32(&mut msg, 4, syscall::VFS_IOCTL);
-    syscall::msg_set_i32(&mut msg, 8, fd);
-    syscall::msg_set_u32(&mut msg, 12, request);
-    syscall::msg_set_u64(&mut msg, 16, arg.addr() as u64);
-    // SAFETY: `msg` is a valid message buffer.
-    unsafe { vfs_call(&mut msg) }
+    minix_std::fs::fstat(fd).map_err(minix_err)
 }
 
 impl File {
@@ -545,12 +462,7 @@ impl File {
     }
 
     pub fn fsync(&self) -> io::Result<()> {
-        let mut msg = [0u8; 64];
-        syscall::msg_set_i32(&mut msg, 4, syscall::VFS_FSYNC);
-        syscall::msg_set_i32(&mut msg, 8, self.fd());
-        // SAFETY: `msg` is a valid message buffer.
-        unsafe { vfs_call(&mut msg) }?;
-        Ok(())
+        minix_std::fs::fsync(self.fd()).map_err(minix_err)
     }
 
     pub fn datasync(&self) -> io::Result<()> {
@@ -578,13 +490,7 @@ impl File {
     }
 
     pub fn truncate(&self, size: u64) -> io::Result<()> {
-        let mut msg = [0u8; 64];
-        syscall::msg_set_i32(&mut msg, 4, syscall::VFS_TRUNCATE);
-        syscall::msg_set_i32(&mut msg, 8, self.fd());
-        syscall::msg_set_i64(&mut msg, 12, size as i64);
-        // SAFETY: `msg` is a valid message buffer.
-        unsafe { vfs_call(&mut msg) }?;
-        Ok(())
+        minix_std::fs::truncate(self.fd(), size as i64).map_err(minix_err)
     }
 
     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
@@ -656,11 +562,7 @@ impl DirBuilder {
 
     pub fn mkdir(&self, p: &Path) -> io::Result<()> {
         let bytes = p.as_os_str().as_encoded_bytes();
-        // SAFETY: `bytes` is a valid byte slice in the caller's address space.
-        let r = unsafe {
-            syscall::syscall2(syscall::NR_MKDIR, bytes.as_ptr().addr() as u64, self.mode as u64)
-        };
-        cvt(r).map(|_| ())
+        minix_std::fs::mkdir(bytes, self.mode).map_err(minix_err)
     }
 }
 
@@ -689,9 +591,7 @@ impl Drop for ReadDir {
 
 pub fn unlink(p: &Path) -> io::Result<()> {
     let bytes = p.as_os_str().as_encoded_bytes();
-    // SAFETY: `bytes` is a valid byte slice in the caller's address space.
-    let r = unsafe { syscall::syscall1(syscall::NR_UNLINK, bytes.as_ptr().addr() as u64) };
-    cvt(r).map(|_| ())
+    minix_std::fs::unlink(bytes).map_err(minix_err)
 }
 
 pub fn rename(_old: &Path, _new: &Path) -> io::Result<()> {
@@ -716,9 +616,7 @@ pub fn set_times_nofollow(_p: &Path, _times: FileTimes) -> io::Result<()> {
 
 pub fn rmdir(p: &Path) -> io::Result<()> {
     let bytes = p.as_os_str().as_encoded_bytes();
-    // SAFETY: `bytes` is a valid byte slice in the caller's address space.
-    let r = unsafe { syscall::syscall1(syscall::NR_RMDIR, bytes.as_ptr().addr() as u64) };
-    cvt(r).map(|_| ())
+    minix_std::fs::rmdir(bytes).map_err(minix_err)
 }
 
 pub fn remove_dir_all(path: &Path) -> io::Result<()> {
