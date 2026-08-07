@@ -14,14 +14,16 @@ pub(crate) fn opts() -> TargetOptions {
     TargetOptions {
         os: Os::Minix,
         executables: true,
-        // The kernel's ELF loader does not set up TLS, so std uses
-        // process-global storage for `thread_local!` for now
-        // (see `library/std/src/sys/thread_local/mod.rs`).
-        has_thread_local: false,
-        // No threads yet: the kernel schedules processes, not threads within
-        // a process. This clears `cfg(target_has_threads)` so the `no_threads`
-        // implementations of the sync primitives are selected.
-        singlethread: true,
+        // Real ELF TLS (`#[thread_local]` statics in a PT_TLS segment): the
+        // kernel exposes a per-thread thread pointer (`SYS_thread_set_tls`,
+        // FS base / tpidr_el0 / tp) that `sys::thread_local` uses, and the
+        // runtime (`minix_start` and the thread trampoline) allocates a TLS
+        // block per thread from the linker-provided `__tls_start`/`__tls_end`.
+        has_thread_local: true,
+        // 1:1 kernel threads: the kernel schedules threads as Proc slots
+        // (`thread_create`/`join`/`yield`/`set_tls`, futex wait/wake). This
+        // clears `cfg(target_has_threads)`.
+        singlethread: false,
         // The std PAL entry point (`_start`) reads argc/argv off the initial
         // stack, so rustc generates a `main(argc, argv)` entry wrapper that
         // calls the `start` lang item.
