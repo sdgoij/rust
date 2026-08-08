@@ -81,12 +81,15 @@ pub(crate) fn init_tls() {
         }
         // Allocate size + 32 so the block can be 16-aligned, and so there is
         // room for the x86_64 TCB self-pointer just past the TLS image (the
-        // thread pointer may sit up to 15 bytes above `block + size`).
-        let alloc = minix_rt::sbrk(size as isize + 32);
+        // thread pointer may sit up to 15 bytes above `block + size`). The
+        // extra 16 covers AArch64, whose thread pointer sits 16 bytes BELOW
+        // the block (the TCB headroom that the TPREL +0x10 addend expects),
+        // so the block is pushed 16 bytes into the allocation.
+        let alloc = minix_rt::sbrk(size as isize + 32 + 16);
         if alloc < 0 {
             return;
         }
-        let block = ((alloc as usize) + 15) & !15;
+        let block = ((alloc as usize) + 31) & !15;
         // Copy the `.tdata` init image, zero the `.tbss` tail.
         core::ptr::copy_nonoverlapping(
             core::ptr::with_exposed_provenance::<u8>(start),
@@ -103,16 +106,20 @@ pub(crate) fn init_tls() {
         //   the thread pointer via `mov %fs:0x0, %rax` (a self-pointer at
         //   [TP]) and addresses TLS variables at negative offsets, so TP
         //   points past the end of the TLS image, 16-aligned.
-        // - aarch64/riscv64 use positive offsets from a TP at the block
-        //   start.
+        // - riscv64 uses positive offsets from a TP at the block start.
+        // - aarch64 also uses positive offsets, but its TPREL relocations
+        //   carry a +0x10 addend (the 16-byte TCB reserved before the TLS
+        //   block), so TP points 16 bytes BELOW the block.
         #[cfg(target_arch = "x86_64")]
         let tp = {
             let tp = (block + size + 15) & !15;
             core::ptr::write(core::ptr::with_exposed_provenance_mut::<u64>(tp), tp as u64);
             tp
         };
-        #[cfg(not(target_arch = "x86_64"))]
+        #[cfg(target_arch = "riscv64")]
         let tp = block;
+        #[cfg(target_arch = "aarch64")]
+        let tp = block - 16;
         minix_rt::thread_set_tls(tp);
     }
 }
