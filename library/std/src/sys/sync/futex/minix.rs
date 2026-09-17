@@ -1,4 +1,4 @@
-//! Futex support — the `sys::futex` API over the kernel's futex syscalls
+//! Futex support — the `sys::sync::futex` API over the kernel's futex syscalls
 //! (`SYS_futex_wait`/`SYS_futex_wake`; see `crates/kernel/src/thread.rs`).
 
 use crate::sync::atomic::Atomic;
