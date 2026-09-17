@@ -18,7 +18,6 @@ pub(crate) mod args;
 pub(crate) mod env;
 pub(crate) mod fd;
 pub(crate) mod fs;
-pub(crate) mod futex;
 pub(crate) mod io_error;
 pub(crate) mod is_terminal;
 pub(crate) mod path;

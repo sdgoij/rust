@@ -3,7 +3,10 @@ use crate::spec::{Arch, CodeModel, LlvmAbi, Target, base};
 pub(crate) fn target() -> Target {
     let mut base = base::minix::opts();
     base.cpu = "generic-rv64".into();
-    base.features = "+m,+a,+f,+d,+c".into();
+    // `+zicsr`/`+zifencei` are listed explicitly because LLVM no longer implies
+    // them (they are separate ISA extensions), matching upstream's
+    // `riscv64gc-unknown-none-elf` spec, which lists the same set.
+    base.features = "+m,+a,+f,+d,+c,+zicsr,+zifencei".into();
     base.max_atomic_width = Some(64);
     base.llvm_abiname = LlvmAbi::Lp64d;
     // medany (PC-relative): the kernel image's `.bss` sits >512 KB past the

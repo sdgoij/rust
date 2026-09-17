@@ -32,6 +32,10 @@ cfg_select! {
         mod wasm;
         pub use wasm::*;
     }
+    target_os = "minix" => {
+        mod minix;
+        pub use minix::*;
+    }
     target_os = "motor" => {
         pub use moto_rt::futex::*;
     }

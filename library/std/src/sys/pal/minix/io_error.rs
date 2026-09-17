@@ -1,5 +1,6 @@
 //! Map Minix errno values to `io::ErrorKind`.
 
+use crate::fmt;
 use crate::io;
 use crate::sys::syscall;
 
@@ -31,7 +32,7 @@ pub fn decode_error_kind(code: io::RawOsError) -> io::ErrorKind {
     }
 }
 
-pub fn error_string(errno: io::RawOsError) -> String {
+pub fn format_error(errno: io::RawOsError, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let name = match errno {
         syscall::EPERM => "Operation not permitted",
         syscall::ENOENT => "No such file or directory",
@@ -54,7 +55,7 @@ pub fn error_string(errno: io::RawOsError) -> String {
         syscall::EDOM => "Numerical argument out of domain",
         syscall::ERANGE => "Numerical result out of range",
         syscall::ENOSYS => "Function not implemented",
-        _ => return format!("Unknown error {errno}"),
+        _ => return write!(f, "Unknown error {errno}"),
     };
-    name.to_string()
+    f.write_str(name)
 }
