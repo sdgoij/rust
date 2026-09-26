@@ -1537,8 +1537,11 @@ supported_targets! {
     ("riscv64gc-unknown-hermit", riscv64gc_unknown_hermit),
     ("x86_64-unknown-hermit", x86_64_unknown_hermit),
     ("aarch64-unknown-minix", aarch64_unknown_minix),
+    ("aarch64-unknown-minix-elf", aarch64_unknown_minix_elf),
     ("riscv64gc-unknown-minix", riscv64gc_unknown_minix),
+    ("riscv64gc-unknown-minix-elf", riscv64gc_unknown_minix_elf),
     ("x86_64-pc-minix", x86_64_pc_minix),
+    ("x86_64-pc-minix-elf", x86_64_pc_minix_elf),
     ("x86_64-unknown-motor", x86_64_unknown_motor),
 
     ("x86_64-unikraft-linux-musl", x86_64_unikraft_linux_musl),
