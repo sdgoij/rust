@@ -1,7 +1,11 @@
 use crate::spec::{Arch, Target, base};
 
 pub(crate) fn target() -> Target {
-    let mut base = base::minix::opts();
+    let mut base = base::minix::opts(&[
+        "--image-base=0x1000000",
+        "--defsym=BASE_ADDRESS=0x1000000",
+        "--defsym=LOADER_BASE=0x4000000",
+    ]);
     base.features = "+v8a,+strict-align,+neon".into();
     base.max_atomic_width = Some(128);
 

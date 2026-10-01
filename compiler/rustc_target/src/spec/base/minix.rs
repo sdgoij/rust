@@ -1,7 +1,38 @@
+//! The `*-minix` base target.
+//!
+//! Two forms are exported: [`opts`] for executables, which takes this arch's
+//! userland image base, and [`dyn_opts`] for the position-independent form a
+//! loader maps as a shared object.
+
 use crate::spec::{Cc, LinkerFlavor, Lld, Os, PanicStrategy, RelocModel, TargetOptions};
 
-pub(crate) fn opts() -> TargetOptions {
-    minix_opts(false)
+/// The executable form of the target.
+///
+/// `pre_link_args` carries this arch's userland base: the `--image-base=` flag,
+/// which pins where an *unlinked* binary's headers go (lld's default, 0x200000, is
+/// inside the kernel image on x86_64, so such a binary would silently alias kernel
+/// memory at run time), and the `--defsym` assignments that
+/// `tools/minix-user.ld` / `tools/minix-ldso.ld` take their `PROVIDE`d bases from.
+///
+/// It has to be `--image-base` rather than `-Ttext` because the kernel's exec
+/// loader derives the code span from the lowest `PT_LOAD`, so the headers segment
+/// must land at the base too.
+///
+/// The `--defsym` is the half that actually moves the sections: with a `-T` script
+/// an explicit section address wins, and lld evaluates the script's `PROVIDE`
+/// before the trailing `-C link-arg` flags — so these come from here, where rustc
+/// places them ahead of every `-T` the build passes. That is also why the base is
+/// set here rather than in each build script: the spec is the only per-arch channel
+/// every link of this target goes through (the Justfile, `tools/build-*.py`,
+/// `tools/cc-minix.py`, `tools/mkinitramfs.rs`).
+///
+/// The base is per-arch because it has to clear the kernel image and the identity
+/// map the kernel runs on (`PHYSMAP.md` P4): 16 MiB on riscv64 and aarch64, whose
+/// images live at or above the RAM base, and 64 MiB on x86_64, whose image is
+/// loaded at 2 MiB and reaches 34 MiB. `LOADER_BASE` is the loader's own base, one
+/// step above the shared-object region, which is why it is a second symbol.
+pub(crate) fn opts(pre_link_args: &'static [&'static str]) -> TargetOptions {
+    minix_opts(false, pre_link_args)
 }
 
 /// The position-independent form of [`opts`]: the same target, for code that a
@@ -13,23 +44,16 @@ pub(crate) fn opts() -> TargetOptions {
 /// absolute relocations a shared object cannot carry (`R_X86_64_64 cannot be
 /// used against local symbol`). So this target's sysroot is built PIC, and the
 /// executable form keeps its `static` model so nothing else in the port changes.
+///
+/// It deliberately carries no `--image-base`: the loader maps a shared object at
+/// a base it chooses (`slot + p_vaddr`), so a link-time base would leave the slot
+/// it reserved short by the object's own base.
 pub(crate) fn dyn_opts() -> TargetOptions {
-    minix_opts(true)
+    minix_opts(true, &[])
 }
 
-fn minix_opts(position_independent: bool) -> TargetOptions {
-    // Pin the image base at the OS's userland address. lld's default base
-    // (0x200000) overlaps the kernel itself (kmain @ 0x200000), so an
-    // unlinked binary would silently alias kernel memory at runtime. This
-    // mirrors `BASE_ADDRESS` in the OS's `tools/minix-user.ld`; the kernel's
-    // exec loader derives the code span from the lowest PT_LOAD, so the
-    // headers segment must land here too (hence `--image-base`, not just
-    // `-Ttext`). A shared object is the exception: the loader maps it at a base
-    // it chooses (`slot + p_vaddr`), so a link-time base would leave the slot it
-    // reserved short by the object's own base.
-    let image_base: &[&'static str] =
-        if position_independent { &[] } else { &["--image-base=0x1000000"] };
-    let pre_link_args = TargetOptions::link_args(LinkerFlavor::Gnu(Cc::No, Lld::No), image_base);
+fn minix_opts(position_independent: bool, pre_link_args: &'static [&'static str]) -> TargetOptions {
+    let pre_link_args = TargetOptions::link_args(LinkerFlavor::Gnu(Cc::No, Lld::No), pre_link_args);
 
     TargetOptions {
         os: Os::Minix,

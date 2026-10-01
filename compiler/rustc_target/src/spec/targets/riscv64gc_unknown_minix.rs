@@ -1,7 +1,11 @@
 use crate::spec::{Arch, CodeModel, LlvmAbi, Target, base};
 
 pub(crate) fn target() -> Target {
-    let mut base = base::minix::opts();
+    let mut base = base::minix::opts(&[
+        "--image-base=0x1000000",
+        "--defsym=BASE_ADDRESS=0x1000000",
+        "--defsym=LOADER_BASE=0x4000000",
+    ]);
     base.cpu = "generic-rv64".into();
     // `+zicsr`/`+zifencei` are listed explicitly because LLVM no longer implies
     // them (they are separate ISA extensions), matching upstream's
