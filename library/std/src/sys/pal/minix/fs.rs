@@ -107,6 +107,14 @@ impl FileAttr {
     fn from_stat(stat: syscall::Stat) -> Self {
         Self { stat }
     }
+
+    pub fn dev(&self) -> u64 {
+        self.stat.st_dev
+    }
+
+    pub fn ino(&self) -> u64 {
+        self.stat.st_ino
+    }
 }
 
 // all DirEntry's will have a reference to this struct
@@ -366,6 +374,11 @@ impl OpenOptions {
         self
     }
 
+    pub fn mode(&mut self, mode: u32) -> &mut OpenOptions {
+        self.mode = mode;
+        self
+    }
+
     fn get_access_mode(&self) -> io::Result<i32> {
         match (self.read, self.write, self.append) {
             (true, false, false) => Ok(syscall::O_RDONLY),
@@ -399,7 +412,7 @@ fn minix_err(e: minix_std::MinixErr) -> io::Error {
     io::Error::from_raw_os_error(e.0)
 }
 
-// Raw VFS helpers — delegated to `minix_std::fs`, the single source of truth
+// Raw VFS helpers â€” delegated to `minix_std::fs`, the single source of truth
 // for the message layouts.
 
 pub(crate) fn open(path: &Path, flags: i32, mode: u32) -> io::Result<i32> {

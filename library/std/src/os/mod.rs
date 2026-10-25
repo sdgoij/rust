@@ -118,6 +118,11 @@ pub mod ios;
 pub mod l4re;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(target_os = "minix")]
+pub mod minix;
+#[cfg(target_os = "minix")]
+#[path = "minix/unix.rs"]
+pub mod unix;
 #[cfg(target_os = "motor")]
 pub mod motor;
 #[cfg(target_os = "netbsd")]
