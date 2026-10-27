@@ -88,3 +88,9 @@ rustc-std-workspace-std = { path = 'rustc-std-workspace-std' }
 
 # See comments in `library/windows-sys/Cargo.toml` for why this is patched
 windows-sys = { path = 'windows-sys' }
+
+# The port's `libc` is a fork (`.notes/wayland.md` 6.13). Upstream's `new` tree has no
+# minix arm, and with the target declaring the unix family its `unistd` re-export is what
+# a std build hits first; the fork dispatches `target_os = "minix"` ahead of `unix` and
+# ships the declarations the port's `libc.so` implements.
+libc = { path = '../../libc' }

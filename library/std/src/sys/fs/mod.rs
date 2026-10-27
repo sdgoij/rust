@@ -6,7 +6,10 @@ use crate::path::{Path, PathBuf};
 pub mod common;
 
 cfg_select! {
-    any(target_family = "unix", target_os = "wasi") => {
+    all(
+        any(target_family = "unix", target_os = "wasi"),
+        not(target_os = "minix"),
+    ) => {
         mod unix;
         use unix as imp;
         #[cfg(any(target_os = "linux", target_os = "android"))]

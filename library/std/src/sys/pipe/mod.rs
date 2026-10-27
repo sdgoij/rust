@@ -1,7 +1,7 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 cfg_select! {
-    unix => {
+    all(unix, not(target_os = "minix")) => {
         mod unix;
         pub use unix::{Pipe, pipe};
     }

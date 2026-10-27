@@ -3,7 +3,10 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 cfg_select! {
-    any(target_family = "unix", target_os = "wasi") => {
+    all(
+        any(target_family = "unix", target_os = "wasi"),
+        not(target_os = "minix"),
+    ) => {
         mod unix;
         pub use unix::*;
     }

@@ -48,7 +48,10 @@ cfg_select! {
         mod unsupported;
         pub use unsupported::{DEFAULT_MIN_STACK_SIZE, Thread, current_os_id, set_name, yield_now};
     }
-    any(target_family = "unix", target_os = "wasi") => {
+    all(
+        any(target_family = "unix", target_os = "wasi"),
+        not(target_os = "minix"),
+    ) => {
         mod unix;
         #[cfg(not(any(
             target_env = "newlib",

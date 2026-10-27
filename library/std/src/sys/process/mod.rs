@@ -1,5 +1,5 @@
 cfg_select! {
-    target_family = "unix" => {
+    all(target_family = "unix", not(target_os = "minix")) => {
         mod unix;
         use unix as imp;
     }

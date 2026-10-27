@@ -4,7 +4,7 @@
 //! userland image base, and [`dyn_opts`] for the position-independent form a
 //! loader maps as a shared object.
 
-use crate::spec::{Cc, LinkerFlavor, Lld, Os, PanicStrategy, RelocModel, TargetOptions};
+use crate::spec::{Cc, LinkerFlavor, Lld, Os, PanicStrategy, RelocModel, TargetOptions, cvs};
 
 /// The executable form of the target.
 ///
@@ -57,6 +57,10 @@ fn minix_opts(position_independent: bool, pre_link_args: &'static [&'static str]
 
     TargetOptions {
         os: Os::Minix,
+        // The unix family, so the ecosystem's `cfg(unix)` arms apply. std keeps
+        // its own minix implementations: every `cfg_select!` unix arm excludes
+        // minix, so the minix arm after it is the one that matches.
+        families: cvs!["unix"],
         executables: true,
         // Real ELF TLS (`#[thread_local]` statics in a PT_TLS segment): the
         // kernel exposes a per-thread thread pointer (`SYS_thread_set_tls`,

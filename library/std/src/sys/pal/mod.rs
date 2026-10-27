@@ -4,7 +4,7 @@
 #![allow(missing_debug_implementations)]
 
 cfg_select! {
-    unix => {
+    all(unix, not(target_os = "minix")) => {
         mod unix;
         pub use self::unix::*;
     }

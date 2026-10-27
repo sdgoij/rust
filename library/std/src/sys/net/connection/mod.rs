@@ -1,10 +1,13 @@
 cfg_select! {
-    any(
-        target_family = "unix",
-        target_os = "windows",
-        target_os = "hermit",
-        all(target_os = "wasi", any(target_env = "p2", target_env = "p3")),
-        target_os = "solid_asp3",
+    all(
+        any(
+            target_family = "unix",
+            target_os = "windows",
+            target_os = "hermit",
+            all(target_os = "wasi", any(target_env = "p2", target_env = "p3")),
+            target_os = "solid_asp3",
+        ),
+        not(target_os = "minix"),
     ) => {
         mod socket;
         pub use socket::*;
