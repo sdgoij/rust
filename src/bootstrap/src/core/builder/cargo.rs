@@ -1327,7 +1327,15 @@ impl Builder<'_> {
                 // We use this instead of `lint_flags` so that we don't have to rebuild all
                 // workspace dependencies when `deny-warnings` changes, but we still get an error
                 // immediately instead of having to wait until the next rebuild.
-                cargo.env("CARGO_BUILD_WARNINGS", "deny");
+                if mode == Mode::Std && target.contains("minix") {
+                    // `std`'s manifest lists `dylib` for every target. A minix target that
+                    // links statically cannot produce one, so rustc drops it with a warning
+                    // that cargo's `build.warnings` turns into a build failure. Deny lints,
+                    // which is what the rule is for; a dropped crate type is not one.
+                    lint_flags.push("-Dwarnings");
+                } else {
+                    cargo.env("CARGO_BUILD_WARNINGS", "deny");
+                }
             }
 
             rustdocflags.arg("-Wrustdoc::invalid_codeblock_attributes");
