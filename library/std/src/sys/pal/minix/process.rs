@@ -325,20 +325,6 @@ fn child_exec(
     syscall::exit(1);
 }
 
-pub fn output(cmd: &mut Command) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
-    cmd.stdin(Stdio::Null);
-    cmd.stdout(Stdio::MakePipe);
-    cmd.stderr(Stdio::MakePipe);
-    let (mut process, pipes) = cmd.spawn(Stdio::Null, false)?;
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    if let (Some(out), Some(err)) = (pipes.stdout, pipes.stderr) {
-        read_output(out, &mut stdout, err, &mut stderr)?;
-    }
-    let status = process.wait()?;
-    Ok((status, stdout, stderr))
-}
-
 impl From<ChildPipe> for Stdio {
     fn from(pipe: ChildPipe) -> Stdio {
         Stdio::Fd(pipe.into_inner())

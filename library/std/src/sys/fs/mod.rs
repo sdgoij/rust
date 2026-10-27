@@ -60,7 +60,10 @@ cfg_select! {
 }
 
 // FIXME: Replace this with platform-specific path conversion functions.
-#[cfg(not(any(target_family = "unix", target_os = "windows", target_os = "wasi")))]
+#[cfg(any(
+    not(any(target_family = "unix", target_os = "windows", target_os = "wasi")),
+    target_os = "minix",
+))]
 #[inline]
 pub fn with_native_path<T>(path: &Path, f: &dyn Fn(&Path) -> io::Result<T>) -> io::Result<T> {
     f(path)

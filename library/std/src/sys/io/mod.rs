@@ -40,7 +40,12 @@ pub use alloc_crate::io::DEFAULT_BUF_SIZE;
 #[cfg_attr(not(target_os = "linux"), allow(unused_imports))]
 #[cfg(all(
     target_family = "unix",
-    not(any(target_os = "dragonfly", target_os = "vxworks", target_os = "rtems"))
+    not(any(
+        target_os = "dragonfly",
+        target_os = "minix",
+        target_os = "vxworks",
+        target_os = "rtems",
+    ))
 ))]
 pub use error::errno_location;
 #[cfg(any(
@@ -49,6 +54,7 @@ pub use error::errno_location;
         not(any(
             target_os = "espidf",
             target_os = "lynxos178",
+            target_os = "minix",
             target_os = "qurt",
             target_os = "rtems",
             target_os = "vxworks",

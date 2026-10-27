@@ -28,6 +28,28 @@ pub(crate) mod time;
 
 use crate::io;
 
+/// A value that uses `-1` to report "look at `errno`".
+#[doc(hidden)]
+pub trait IsMinusOne {
+    fn is_minus_one(&self) -> bool;
+}
+
+macro_rules! impl_is_minus_one {
+    ($($t:ident)*) => ($(impl IsMinusOne for $t {
+        fn is_minus_one(&self) -> bool {
+            *self == -1
+        }
+    })*)
+}
+
+impl_is_minus_one! { i8 i16 i32 i64 isize }
+
+/// Converts a native return value to `Result`, the `-1` means "the error is in `errno`"
+/// convention. The port's C library follows it, so this matches the unix PAL's helper.
+pub fn cvt<T: IsMinusOne>(t: T) -> io::Result<T> {
+    if t.is_minus_one() { Err(io::Error::last_os_error()) } else { Ok(t) }
+}
+
 // SAFETY: must be called only once during runtime initialization.
 // NOTE: this is not guaranteed to run, for example when Rust code is called
 // externally.

@@ -152,7 +152,12 @@ pub(crate) mod guard {
 pub(crate) mod key {
     cfg_select! {
         any(
-            all(not(target_vendor = "apple"), not(target_family = "wasm"), target_family = "unix"),
+            all(
+                not(target_vendor = "apple"),
+                not(target_family = "wasm"),
+                target_family = "unix",
+                not(target_os = "minix"),
+            ),
             all(not(target_thread_local), target_vendor = "apple"),
             target_os = "teeos",
             all(target_os = "wasi", target_env = "p3"),
@@ -162,7 +167,6 @@ pub(crate) mod key {
             #[cfg(test)]
             mod tests;
             pub(super) use racy::LazyKey;
-            #[cfg(any(not(target_thread_local), test))]
             pub(super) use unix::get;
             pub(super) use unix::{Key, set};
             use unix::{create, destroy};

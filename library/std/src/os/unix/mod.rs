@@ -88,13 +88,25 @@ mod platform {
     pub use crate::os::vxworks::*;
 }
 
+#[cfg(not(target_os = "minix"))]
 pub mod ffi;
+#[cfg(not(target_os = "minix"))]
 pub mod fs;
 pub mod io;
+#[cfg(not(target_os = "minix"))]
 pub mod net;
+#[cfg(not(target_os = "minix"))]
 pub mod process;
+#[cfg(not(target_os = "minix"))]
 pub mod raw;
+#[cfg(not(target_os = "minix"))]
 pub mod thread;
+
+/// The port's Unix names: `std::os::unix::{ffi, fs, net}` are what `std::os::minix`
+/// provides, so they behave identically through either path.
+#[cfg(target_os = "minix")]
+#[stable(feature = "minix_os", since = "1.100.0")]
+pub use crate::os::minix::{ffi, fs, net};
 
 /// A prelude for conveniently writing platform-specific code.
 ///
@@ -105,24 +117,33 @@ pub mod prelude {
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::ffi::{OsStrExt, OsStringExt};
     #[doc(no_inline)]
+    #[cfg(not(target_os = "minix"))]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::fs::DirEntryExt;
     #[doc(no_inline)]
+    #[cfg(not(target_os = "minix"))]
     #[stable(feature = "file_offset", since = "1.15.0")]
     pub use super::fs::FileExt;
     #[doc(no_inline)]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub use super::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+    pub use super::fs::{MetadataExt, OpenOptionsExt};
+    #[doc(no_inline)]
+    #[cfg(not(target_os = "minix"))]
+    #[stable(feature = "rust1", since = "1.0.0")]
+    pub use super::fs::{FileTypeExt, PermissionsExt};
     #[doc(no_inline)]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
     #[doc(no_inline)]
+    #[cfg(not(target_os = "minix"))]
     #[unstable(feature = "unix_send_signal", issue = "141975")]
     pub use super::process::ChildExt;
     #[doc(no_inline)]
+    #[cfg(not(target_os = "minix"))]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::process::{CommandExt, ExitStatusExt};
     #[doc(no_inline)]
+    #[cfg(not(target_os = "minix"))]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::thread::JoinHandleExt;
 }

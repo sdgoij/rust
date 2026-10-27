@@ -34,7 +34,7 @@ pub use env::CommandEnvs;
 pub use env::CommandResolvedEnvs;
 #[cfg(target_os = "linux")]
 pub use imp::PidFd;
-#[cfg(target_family = "unix")]
+#[cfg(all(target_family = "unix", not(target_os = "minix")))]
 pub use imp::getppid;
 pub use imp::{
     ChildPipe, Command, CommandArgs, EnvKey, ExitCode, ExitStatus, ExitStatusError, Process, Stdio,
