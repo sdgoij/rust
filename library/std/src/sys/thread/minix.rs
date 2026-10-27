@@ -60,6 +60,16 @@ impl Thread {
     pub fn join(self) {
         minix_rt::thread_join(self.tid);
     }
+
+    /// The kernel's id for this thread, the one `thread_join` takes.
+    pub fn id(&self) -> u64 {
+        self.tid as u64
+    }
+
+    /// The same id, taking the handle: the caller becomes its only owner.
+    pub fn into_id(self) -> u64 {
+        self.tid as u64
+    }
 }
 
 /// The spawned-thread entry: called by the kernel with the leaked `ThreadInit`

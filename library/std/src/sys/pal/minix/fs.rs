@@ -534,6 +534,21 @@ impl File {
         false
     }
 
+    pub fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        // SAFETY: `buf` is a valid mutable byte slice in the caller's address
+        // space.
+        unsafe { minix_std::fs::pread(self.fd(), buf, offset) }
+            .map(|n| n as usize)
+            .map_err(minix_err)
+    }
+
+    pub fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+        // SAFETY: `buf` is a valid byte slice in the caller's address space.
+        unsafe { minix_std::fs::pwrite(self.fd(), buf, offset) }
+            .map(|n| n as usize)
+            .map_err(minix_err)
+    }
+
     pub fn flush(&self) -> io::Result<()> {
         Ok(())
     }

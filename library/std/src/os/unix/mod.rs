@@ -102,11 +102,11 @@ pub mod raw;
 #[cfg(not(target_os = "minix"))]
 pub mod thread;
 
-/// The port's Unix names: `std::os::unix::{ffi, fs, net}` are what `std::os::minix`
-/// provides, so they behave identically through either path.
+/// The port's Unix names: `std::os::unix::{ffi, fs, net, thread}` are what
+/// `std::os::minix` provides, so they behave identically through either path.
 #[cfg(target_os = "minix")]
 #[stable(feature = "minix_os", since = "1.100.0")]
-pub use crate::os::minix::{ffi, fs, net};
+pub use crate::os::minix::{ffi, fs, net, thread};
 
 /// A prelude for conveniently writing platform-specific code.
 ///
@@ -121,16 +121,15 @@ pub mod prelude {
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::fs::DirEntryExt;
     #[doc(no_inline)]
-    #[cfg(not(target_os = "minix"))]
     #[stable(feature = "file_offset", since = "1.15.0")]
     pub use super::fs::FileExt;
-    #[doc(no_inline)]
-    #[stable(feature = "rust1", since = "1.0.0")]
-    pub use super::fs::{MetadataExt, OpenOptionsExt};
     #[doc(no_inline)]
     #[cfg(not(target_os = "minix"))]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::fs::{FileTypeExt, PermissionsExt};
+    #[doc(no_inline)]
+    #[stable(feature = "rust1", since = "1.0.0")]
+    pub use super::fs::{MetadataExt, OpenOptionsExt};
     #[doc(no_inline)]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
@@ -143,7 +142,6 @@ pub mod prelude {
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::process::{CommandExt, ExitStatusExt};
     #[doc(no_inline)]
-    #[cfg(not(target_os = "minix"))]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::thread::JoinHandleExt;
 }
