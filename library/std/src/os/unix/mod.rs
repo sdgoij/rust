@@ -126,10 +126,10 @@ pub mod prelude {
     #[doc(no_inline)]
     #[cfg(not(target_os = "minix"))]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub use super::fs::{FileTypeExt, PermissionsExt};
+    pub use super::fs::FileTypeExt;
     #[doc(no_inline)]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub use super::fs::{MetadataExt, OpenOptionsExt};
+    pub use super::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     #[doc(no_inline)]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};

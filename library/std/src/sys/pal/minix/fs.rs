@@ -18,6 +18,7 @@ use crate::sys::fd::FileDesc;
 pub use crate::sys::fs::common::Dir;
 use crate::sys::time::SystemTime;
 use crate::sys::{AsInner, FromInner, IntoInner, syscall, unsupported};
+use crate::vec::Vec;
 
 // File type bits for st_mode (from `minix/include/stat.h`).
 const S_IFMT: u32 = 0o170000;
@@ -114,6 +115,34 @@ impl FileAttr {
 
     pub fn ino(&self) -> u64 {
         self.stat.st_ino
+    }
+
+    pub fn mode(&self) -> u32 {
+        self.stat.st_mode
+    }
+
+    pub fn uid(&self) -> u32 {
+        self.stat.st_uid
+    }
+
+    pub fn gid(&self) -> u32 {
+        self.stat.st_gid
+    }
+
+    pub fn nlink(&self) -> u64 {
+        self.stat.st_nlink as u64
+    }
+
+    pub fn rdev(&self) -> u64 {
+        self.stat.st_rdev
+    }
+
+    pub fn blksize(&self) -> u64 {
+        self.stat.st_blksize.max(0) as u64
+    }
+
+    pub fn blocks(&self) -> u64 {
+        self.stat.st_blocks.max(0) as u64
     }
 }
 
@@ -226,6 +255,14 @@ impl FileAttr {
 }
 
 impl FilePermissions {
+    pub fn mode(&self) -> u32 {
+        self.mode
+    }
+
+    pub fn from_mode(mode: u32) -> FilePermissions {
+        FilePermissions { mode }
+    }
+
     pub fn readonly(&self) -> bool {
         // Check if any class (owner, group, others) has write permission.
         self.mode & 0o222 == 0
@@ -574,8 +611,10 @@ impl File {
         unsupported()
     }
 
-    pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
-        unsupported()
+    pub fn set_permissions(&self, perm: FilePermissions) -> io::Result<()> {
+        // `Permissions::mode()` is the raw `st_mode` when it came from metadata;
+        // chmod sets only the permission bits (setuid, setgid, sticky and rwx).
+        minix_std::fs::fchmod(self.fd(), perm.mode() & 0o7777).map_err(minix_err)
     }
 
     pub fn set_times(&self, _times: FileTimes) -> io::Result<()> {
@@ -586,6 +625,11 @@ impl File {
 impl DirBuilder {
     pub fn new() -> DirBuilder {
         DirBuilder { mode: 0o777 }
+    }
+
+    pub fn mode(&mut self, mode: u32) -> &mut DirBuilder {
+        self.mode = mode;
+        self
     }
 
     pub fn mkdir(&self, p: &Path) -> io::Result<()> {
@@ -673,16 +717,33 @@ pub fn exists(path: &Path) -> io::Result<bool> {
     }
 }
 
-pub fn readlink(_p: &Path) -> io::Result<PathBuf> {
-    unsupported()
+pub fn readlink(p: &Path) -> io::Result<PathBuf> {
+    let path = p.as_os_str().as_encoded_bytes();
+    let mut buf = Vec::new();
+    buf.resize(256, 0);
+    loop {
+        let n = minix_std::fs::readlink(path, &mut buf).map_err(minix_err)?;
+        if n < buf.len() {
+            buf.truncate(n);
+            // SAFETY: the bytes are the link target the kernel returned, so
+            // they round-trip through `OsString::as_encoded_bytes`.
+            return Ok(PathBuf::from(unsafe { OsString::from_encoded_bytes_unchecked(buf) }));
+        }
+        let grown = buf.len() * 2;
+        buf.resize(grown, 0);
+    }
 }
 
-pub fn symlink(_original: &Path, _link: &Path) -> io::Result<()> {
-    unsupported()
+pub fn symlink(original: &Path, link: &Path) -> io::Result<()> {
+    let original = original.as_os_str().as_encoded_bytes();
+    let link = link.as_os_str().as_encoded_bytes();
+    minix_std::fs::symlink(original, link).map_err(minix_err)
 }
 
-pub fn link(_src: &Path, _dst: &Path) -> io::Result<()> {
-    unsupported()
+pub fn link(src: &Path, dst: &Path) -> io::Result<()> {
+    let src = src.as_os_str().as_encoded_bytes();
+    let dst = dst.as_os_str().as_encoded_bytes();
+    minix_std::fs::link(src, dst).map_err(minix_err)
 }
 
 pub fn stat(p: &Path) -> io::Result<FileAttr> {
