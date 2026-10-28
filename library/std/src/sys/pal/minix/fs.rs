@@ -22,15 +22,39 @@ use crate::vec::Vec;
 
 // File type bits for st_mode (from `minix/include/stat.h`).
 const S_IFMT: u32 = 0o170000;
+const S_IFIFO: u32 = 0o010000;
+const S_IFCHR: u32 = 0o020000;
 const S_IFDIR: u32 = 0o040000;
+const S_IFBLK: u32 = 0o060000;
 const S_IFREG: u32 = 0o100000;
 const S_IFLNK: u32 = 0o120000;
+const S_IFSOCK: u32 = 0o140000;
 
-// getdents entry type codes.
-const DT_UNKNOWN: u8 = 0;
-const DT_REG: u8 = 1;
-const DT_DIR: u8 = 2;
-const DT_LNK: u8 = 3;
+// getdents entry type codes, the values `tools/c-include/dirent.h` defines and
+// `vfs::getdents` writes.
+const DT_FIFO: u8 = 1;
+const DT_CHR: u8 = 2;
+const DT_DIR: u8 = 4;
+const DT_BLK: u8 = 6;
+const DT_REG: u8 = 8;
+const DT_LNK: u8 = 10;
+const DT_SOCK: u8 = 12;
+
+/// The `S_IF*` class a dirent's `DT_*` code stands for. `DT_UNKNOWN` and any
+/// other code the port does not emit map to 0, which is no class at all, so
+/// every `FileType` predicate answers false for them.
+fn dir_type_to_mode(dt: u8) -> u32 {
+    match dt {
+        DT_FIFO => S_IFIFO,
+        DT_CHR => S_IFCHR,
+        DT_DIR => S_IFDIR,
+        DT_BLK => S_IFBLK,
+        DT_REG => S_IFREG,
+        DT_LNK => S_IFLNK,
+        DT_SOCK => S_IFSOCK,
+        _ => 0,
+    }
+}
 
 pub struct File {
     inner: FileDesc,
@@ -186,6 +210,7 @@ pub struct OpenOptions {
     create_new: bool,
     // system-specific
     mode: u32,
+    custom_flags: i32,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -198,7 +223,9 @@ pub struct FilePermissions {
 
 #[derive(Copy, Clone, Eq, Debug)]
 pub struct FileType {
-    mode: u8,
+    /// The entry's `S_IF*` class: `st_mode & S_IFMT` for a stat, mapped from the
+    /// dirent's `DT_*` code for a directory entry.
+    mode: u32,
 }
 
 impl PartialEq for FileType {
@@ -229,16 +256,9 @@ impl FileAttr {
 
     pub fn file_type(&self) -> FileType {
         let masked_mode = self.stat.st_mode & S_IFMT;
-        let mode = match masked_mode {
-            S_IFDIR => DT_DIR,
-            S_IFLNK => DT_LNK,
-            S_IFREG => DT_REG,
-            // The VFS server does not copy the stat payload yet, so treat
-            // zeroed stat data as a regular file.
-            0 => DT_REG,
-            _ => DT_UNKNOWN,
-        };
-        FileType { mode }
+        // The VFS server does not copy the stat payload yet, so treat zeroed
+        // stat data as a regular file.
+        FileType { mode: if masked_mode == 0 { S_IFREG } else { masked_mode } }
     }
 
     pub fn modified(&self) -> io::Result<SystemTime> {
@@ -284,13 +304,25 @@ impl FileTimes {
 
 impl FileType {
     pub fn is_dir(&self) -> bool {
-        self.mode == DT_DIR
+        self.mode == S_IFDIR
     }
     pub fn is_file(&self) -> bool {
-        self.mode == DT_REG
+        self.mode == S_IFREG
     }
     pub fn is_symlink(&self) -> bool {
-        self.mode == DT_LNK
+        self.mode == S_IFLNK
+    }
+    pub fn is_block_device(&self) -> bool {
+        self.mode == S_IFBLK
+    }
+    pub fn is_char_device(&self) -> bool {
+        self.mode == S_IFCHR
+    }
+    pub fn is_fifo(&self) -> bool {
+        self.mode == S_IFIFO
+    }
+    pub fn is_socket(&self) -> bool {
+        self.mode == S_IFSOCK
     }
 }
 
@@ -367,7 +399,7 @@ impl DirEntry {
     }
 
     pub fn file_type(&self) -> io::Result<FileType> {
-        Ok(FileType { mode: self.type_ })
+        Ok(FileType { mode: dir_type_to_mode(self.type_) })
     }
 }
 
@@ -383,6 +415,7 @@ impl OpenOptions {
             create_new: false,
             // system-specific
             mode: 0o666,
+            custom_flags: 0,
         }
     }
 
@@ -413,6 +446,11 @@ impl OpenOptions {
 
     pub fn mode(&mut self, mode: u32) -> &mut OpenOptions {
         self.mode = mode;
+        self
+    }
+
+    pub fn custom_flags(&mut self, flags: i32) -> &mut OpenOptions {
+        self.custom_flags = flags;
         self
     }
 
@@ -487,7 +525,7 @@ fn fstat(fd: i32) -> io::Result<syscall::Stat> {
 
 impl File {
     pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
-        let flags = opts.get_access_mode()? | opts.get_creation_mode()?;
+        let flags = opts.get_access_mode()? | opts.get_creation_mode()? | opts.custom_flags;
         let mode = opts.mode;
         let fd = open(path, flags, mode)?;
         // SAFETY: `fd` is a freshly opened, owned descriptor.

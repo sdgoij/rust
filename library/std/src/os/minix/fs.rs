@@ -1,4 +1,4 @@
-use crate::fs::{DirBuilder, File, Metadata, OpenOptions, Permissions};
+use crate::fs::{DirBuilder, File, FileType, Metadata, OpenOptions, Permissions};
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut};
 use crate::path::Path;
 use crate::sys::{AsInner, AsInnerMut, FromInner};
@@ -10,6 +10,11 @@ pub trait OpenOptionsExt {
     /// is created.
     #[stable(feature = "minix_os", since = "1.100.0")]
     fn mode(&mut self, mode: u32) -> &mut Self;
+
+    /// Sets the `O_*` flags that go to `open(2)` beyond the ones the builder
+    /// derives from read, write, append, truncate and create.
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn custom_flags(&mut self, flags: i32) -> &mut Self;
 }
 
 #[stable(feature = "minix_os", since = "1.100.0")]
@@ -17,6 +22,50 @@ impl OpenOptionsExt for OpenOptions {
     fn mode(&mut self, mode: u32) -> &mut Self {
         self.as_inner_mut().mode(mode);
         self
+    }
+
+    fn custom_flags(&mut self, flags: i32) -> &mut Self {
+        self.as_inner_mut().custom_flags(flags);
+        self
+    }
+}
+
+/// Minix-specific extensions to [`FileType`].
+#[stable(feature = "minix_os", since = "1.100.0")]
+pub trait FileTypeExt {
+    /// Is this a block device?
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn is_block_device(&self) -> bool;
+
+    /// Is this a character device?
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn is_char_device(&self) -> bool;
+
+    /// Is this a FIFO (named pipe)?
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn is_fifo(&self) -> bool;
+
+    /// Is this a socket?
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn is_socket(&self) -> bool;
+}
+
+#[stable(feature = "minix_os", since = "1.100.0")]
+impl FileTypeExt for FileType {
+    fn is_block_device(&self) -> bool {
+        self.as_inner().is_block_device()
+    }
+
+    fn is_char_device(&self) -> bool {
+        self.as_inner().is_char_device()
+    }
+
+    fn is_fifo(&self) -> bool {
+        self.as_inner().is_fifo()
+    }
+
+    fn is_socket(&self) -> bool {
+        self.as_inner().is_socket()
     }
 }
 
