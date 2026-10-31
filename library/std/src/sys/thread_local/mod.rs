@@ -167,9 +167,9 @@ pub(crate) mod key {
             #[cfg(test)]
             mod tests;
             pub(super) use racy::LazyKey;
-            // Only the `os` key implementation calls `get`, and native TLS
-            // replaces that implementation.
-            #[cfg(not(target_thread_local))]
+            // The `os` key implementation is the only caller, and targets with
+            // native TLS do not compile it; the re-export stays for the rest.
+            #[allow(unused_imports)]
             pub(super) use unix::get;
             pub(super) use unix::{Key, set};
             use unix::{create, destroy};
