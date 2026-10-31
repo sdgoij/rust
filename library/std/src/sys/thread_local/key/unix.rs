@@ -46,6 +46,9 @@ pub unsafe fn set(key: Key, value: *mut u8) {
 }
 
 #[inline]
+// The `os` key implementation is the only caller, and it is not compiled
+// under native TLS.
+#[cfg_attr(target_thread_local, allow(dead_code))]
 pub unsafe fn get(key: Key) -> *mut u8 {
     unsafe { libc::pthread_getspecific(key) as *mut u8 }
 }
