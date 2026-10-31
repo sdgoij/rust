@@ -102,11 +102,12 @@ pub mod raw;
 #[cfg(not(target_os = "minix"))]
 pub mod thread;
 
-/// The port's Unix names: `std::os::unix::{ffi, fs, net, thread}` are what
-/// `std::os::minix` provides, so they behave identically through either path.
+/// The port's Unix names: `std::os::unix::{ffi, fs, net, process, thread}` are
+/// what `std::os::minix` provides, so they behave identically through either
+/// path.
 #[cfg(target_os = "minix")]
 #[stable(feature = "minix_os", since = "1.100.0")]
-pub use crate::os::minix::{ffi, fs, net, thread};
+pub use crate::os::minix::{ffi, fs, net, process, thread};
 
 /// A prelude for conveniently writing platform-specific code.
 ///

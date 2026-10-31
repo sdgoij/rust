@@ -17,4 +17,6 @@ pub mod fs;
 #[stable(feature = "minix_os", since = "1.100.0")]
 pub mod net;
 #[stable(feature = "minix_os", since = "1.100.0")]
+pub mod process;
+#[stable(feature = "minix_os", since = "1.100.0")]
 pub mod thread;

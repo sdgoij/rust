@@ -1,4 +1,4 @@
-use crate::fs::{DirBuilder, File, FileType, Metadata, OpenOptions, Permissions};
+use crate::fs::{DirBuilder, DirEntry, File, FileType, Metadata, OpenOptions, Permissions};
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut};
 use crate::path::Path;
 use crate::sys::{AsInner, AsInnerMut, FromInner};
@@ -316,5 +316,20 @@ impl FileExt for File {
 
     fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
         self.as_inner().write_at(buf, offset)
+    }
+}
+
+/// Unix-specific extension methods for [`DirEntry`].
+#[stable(feature = "minix_os", since = "1.100.0")]
+pub trait DirEntryExt {
+    /// Returns the underlying `d_ino` field of the directory entry.
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn ino(&self) -> u64;
+}
+
+#[stable(feature = "minix_os", since = "1.100.0")]
+impl DirEntryExt for DirEntry {
+    fn ino(&self) -> u64 {
+        self.as_inner().ino()
     }
 }

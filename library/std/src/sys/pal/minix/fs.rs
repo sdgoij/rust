@@ -196,6 +196,7 @@ struct MinixDirent {
 pub struct DirEntry {
     dir: crate::sync::Arc<InnerReadDir>,
     type_: u8,
+    ino: u64,
     name: OsString,
 }
 
@@ -379,6 +380,7 @@ impl Iterator for ReadDir {
             return Some(Ok(DirEntry {
                 dir: crate::sync::Arc::clone(&self.inner),
                 type_: dirent.d_file_type,
+                ino: dirent.d_ino as u64,
                 name,
             }));
         }
@@ -392,6 +394,10 @@ impl DirEntry {
 
     pub fn file_name(&self) -> OsString {
         self.name.clone()
+    }
+
+    pub fn ino(&self) -> u64 {
+        self.ino
     }
 
     pub fn metadata(&self) -> io::Result<FileAttr> {

@@ -129,46 +129,9 @@ impl Command {
         // Resolve the program path and build the argv/envp pointer arrays
         // before forking, so the child only runs syscalls. `minix_rt::execve`
         // requires NUL-terminated arrays of NUL-terminated strings.
-        let program = self.program.as_encoded_bytes();
-        let has_slash = program.contains(&b'/');
-        let mut path = Vec::new();
-        if has_slash {
-            path.extend_from_slice(program);
-        } else {
-            path.extend_from_slice(b"/bin/");
-            path.extend_from_slice(program);
-        }
-        path.push(0);
-        let mut alt_path = Vec::new();
-        if !has_slash {
-            alt_path.extend_from_slice(b"/sbin/");
-            alt_path.extend_from_slice(program);
-            alt_path.push(0);
-        }
-
-        let mut argv_owned: Vec<Vec<u8>> = Vec::new();
-        let mut argv0 = path[..path.len() - 1].to_vec();
-        argv0.push(0);
-        argv_owned.push(argv0);
-        for arg in &self.args[1..] {
-            let mut entry = arg.as_encoded_bytes().to_vec();
-            entry.push(0);
-            argv_owned.push(entry);
-        }
-        let mut argv_ptrs: Vec<*const u8> = argv_owned.iter().map(|s| s.as_ptr()).collect();
-        argv_ptrs.push(core::ptr::null());
-
-        let env = self.env.capture();
-        let mut envp_owned: Vec<Vec<u8>> = Vec::new();
-        for (key, value) in &env {
-            let mut entry = key.as_encoded_bytes().to_vec();
-            entry.push(b'=');
-            entry.extend_from_slice(value.as_encoded_bytes());
-            entry.push(0);
-            envp_owned.push(entry);
-        }
-        let mut envp_ptrs: Vec<*const u8> = envp_owned.iter().map(|s| s.as_ptr()).collect();
-        envp_ptrs.push(core::ptr::null());
+        let image = self.exec_image();
+        let argv_ptrs = image.argv_ptrs();
+        let envp_ptrs = image.envp_ptrs();
 
         let pid = syscall::fork();
         if pid < 0 {
@@ -180,8 +143,8 @@ impl Command {
                 &stdin,
                 &stdout,
                 &stderr,
-                &path,
-                &alt_path,
+                &image.path,
+                &image.alt_path,
                 argv_ptrs.as_ptr(),
                 envp_ptrs.as_ptr(),
                 self.cwd.as_deref(),
@@ -200,6 +163,155 @@ impl Command {
         let pipes =
             StdioPipes { stdin: stdin.parent, stdout: stdout.parent, stderr: stderr.parent };
         Ok((Process { pid, status: None }, pipes))
+    }
+
+    /// Replace this process with the command, as `CommandExt::exec` asks.
+    ///
+    /// There is no fork here: the stdio wiring is applied in place, the cwd is
+    /// changed, and the image is exec'd. A configured pipe cannot survive the
+    /// replacement, so it is refused rather than silently left behind.
+    pub fn exec(&mut self, _default: Stdio) -> io::Error {
+        for stdio in [&self.stdin, &self.stdout, &self.stderr] {
+            if matches!(stdio, Some(Stdio::MakePipe)) {
+                return io::const_error!(
+                    io::ErrorKind::InvalidInput,
+                    "cannot exec with piped stdio"
+                );
+            }
+        }
+
+        let default = Stdio::Inherit;
+        let prepared = [
+            prepare(self.stdin.as_ref().unwrap_or(&default), true),
+            prepare(self.stdout.as_ref().unwrap_or(&default), false),
+            prepare(self.stderr.as_ref().unwrap_or(&default), false),
+        ];
+
+        for (slot, prep) in prepared.into_iter().enumerate() {
+            let prep = match prep {
+                Ok(prep) => prep,
+                Err(e) => return e,
+            };
+            if let Some(fd) = prep.dup {
+                let r = syscall::dup2(fd, slot as i32);
+                if r < 0 {
+                    return errno_of(r);
+                }
+                // Route the slot through VFS rather than the serial shortcut,
+                // as `child_exec` does; the flag survives the exec.
+                syscall::set_fd_vfs(slot as i32, 1);
+            }
+            close_fd(prep.close[0]);
+            close_fd(prep.close[1]);
+            if let Some(fd) = prep.parent_close {
+                close_fd(fd);
+            }
+        }
+
+        if let Some(cwd) = &self.cwd {
+            if let Err(e) = crate::sys::paths::chdir(Path::new(cwd)) {
+                return e;
+            }
+        }
+
+        let image = self.exec_image();
+        let argv_ptrs = image.argv_ptrs();
+        let envp_ptrs = image.envp_ptrs();
+        // SAFETY: both paths and every string the pointer arrays name are NUL
+        // terminated and stay alive for the duration of the call.
+        let r = unsafe {
+            minix_rt::execve(
+                image.path.as_ptr(),
+                image.path.len(),
+                argv_ptrs.as_ptr(),
+                envp_ptrs.as_ptr(),
+            )
+        };
+        if r < 0 && !image.alt_path.is_empty() {
+            // SAFETY: as above, for the `/sbin` fallback.
+            let r2 = unsafe {
+                minix_rt::execve(
+                    image.alt_path.as_ptr(),
+                    image.alt_path.len(),
+                    argv_ptrs.as_ptr(),
+                    envp_ptrs.as_ptr(),
+                )
+            };
+            if r2 < 0 {
+                return errno_of(r2);
+            }
+        }
+        if r >= 0 {
+            return io::const_error!(
+                io::ErrorKind::Other,
+                "execve returned without replacing the image"
+            );
+        }
+        errno_of(r)
+    }
+
+    /// The path, its `/sbin` fallback, and the argv/envp blocks for this
+    /// command, with the NUL termination `execve` requires.
+    fn exec_image(&self) -> ExecImage {
+        let program = self.program.as_encoded_bytes();
+        let has_slash = program.contains(&b'/');
+        let mut path = Vec::new();
+        if has_slash {
+            path.extend_from_slice(program);
+        } else {
+            path.extend_from_slice(b"/bin/");
+            path.extend_from_slice(program);
+        }
+        path.push(0);
+        let mut alt_path = Vec::new();
+        if !has_slash {
+            alt_path.extend_from_slice(b"/sbin/");
+            alt_path.extend_from_slice(program);
+            alt_path.push(0);
+        }
+
+        let mut argv = Vec::new();
+        let mut argv0 = path[..path.len() - 1].to_vec();
+        argv0.push(0);
+        argv.push(argv0);
+        for arg in &self.args[1..] {
+            let mut entry = arg.as_encoded_bytes().to_vec();
+            entry.push(0);
+            argv.push(entry);
+        }
+
+        let mut envp = Vec::new();
+        for (key, value) in &self.env.capture() {
+            let mut entry = key.as_encoded_bytes().to_vec();
+            entry.push(b'=');
+            entry.extend_from_slice(value.as_encoded_bytes());
+            entry.push(0);
+            envp.push(entry);
+        }
+
+        ExecImage { path, alt_path, argv, envp }
+    }
+}
+
+/// A `Command` resolved into what `execve` takes.
+struct ExecImage {
+    path: Vec<u8>,
+    alt_path: Vec<u8>,
+    argv: Vec<Vec<u8>>,
+    envp: Vec<Vec<u8>>,
+}
+
+impl ExecImage {
+    fn argv_ptrs(&self) -> Vec<*const u8> {
+        let mut ptrs: Vec<*const u8> = self.argv.iter().map(|s| s.as_ptr()).collect();
+        ptrs.push(core::ptr::null());
+        ptrs
+    }
+
+    fn envp_ptrs(&self) -> Vec<*const u8> {
+        let mut ptrs: Vec<*const u8> = self.envp.iter().map(|s| s.as_ptr()).collect();
+        ptrs.push(core::ptr::null());
+        ptrs
     }
 }
 
