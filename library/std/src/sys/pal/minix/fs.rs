@@ -1,11 +1,7 @@
 //! File system operations over the VFS server protocol.
 //!
 //! The VFS server handles `open`/`read`/`write`/`lseek`/`close`/`getdents`/
-//! `fstat` etc.; the kernel handles `mkdir`/`unlink`/`rmdir` directly.
-//!
-//! Note: the VFS `stat` path does not yet copy the `struct stat` payload back
-//! to user space, so `FileAttr` synthesizes the file size from `lseek` until
-//! that is wired up.
+//! `stat` etc.; the kernel handles `mkdir`/`unlink`/`rmdir` directly.
 
 use crate::ffi::OsString;
 use crate::fmt;
@@ -215,7 +211,10 @@ pub struct OpenOptions {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-pub struct FileTimes {}
+pub struct FileTimes {
+    accessed: Option<SystemTime>,
+    modified: Option<SystemTime>,
+}
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FilePermissions {
@@ -256,10 +255,7 @@ impl FileAttr {
     }
 
     pub fn file_type(&self) -> FileType {
-        let masked_mode = self.stat.st_mode & S_IFMT;
-        // The VFS server does not copy the stat payload yet, so treat zeroed
-        // stat data as a regular file.
-        FileType { mode: if masked_mode == 0 { S_IFREG } else { masked_mode } }
+        FileType { mode: self.stat.st_mode & S_IFMT }
     }
 
     pub fn modified(&self) -> io::Result<SystemTime> {
@@ -299,8 +295,13 @@ impl FilePermissions {
 }
 
 impl FileTimes {
-    pub fn set_accessed(&mut self, _t: SystemTime) {}
-    pub fn set_modified(&mut self, _t: SystemTime) {}
+    pub fn set_accessed(&mut self, t: SystemTime) {
+        self.accessed = Some(t);
+    }
+
+    pub fn set_modified(&mut self, t: SystemTime) {
+        self.modified = Some(t);
+    }
 }
 
 impl FileType {
@@ -401,7 +402,9 @@ impl DirEntry {
     }
 
     pub fn metadata(&self) -> io::Result<FileAttr> {
-        stat(&self.path())
+        // std documents that a directory entry's metadata is not reached
+        // through a symlink, so this is `lstat`, not `stat`.
+        lstat(&self.path())
     }
 
     pub fn file_type(&self) -> io::Result<FileType> {
@@ -493,7 +496,7 @@ fn minix_err(e: minix_std::MinixErr) -> io::Error {
     io::Error::from_raw_os_error(e.0)
 }
 
-// Raw VFS helpers â€” delegated to `minix_std::fs`, the single source of truth
+// Raw VFS helpers, delegated to `minix_std::fs`, the single source of truth
 // for the message layouts.
 
 pub(crate) fn open(path: &Path, flags: i32, mode: u32) -> io::Result<i32> {
@@ -529,6 +532,14 @@ fn fstat(fd: i32) -> io::Result<syscall::Stat> {
     minix_std::fs::fstat(fd).map_err(minix_err)
 }
 
+fn stat_bytes(path: &[u8]) -> io::Result<syscall::Stat> {
+    minix_std::fs::stat_bytes(path).map_err(minix_err)
+}
+
+fn lstat_bytes(path: &[u8]) -> io::Result<syscall::Stat> {
+    minix_std::fs::lstat_bytes(path).map_err(minix_err)
+}
+
 impl File {
     pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
         let flags = opts.get_access_mode()? | opts.get_creation_mode()? | opts.custom_flags;
@@ -539,20 +550,7 @@ impl File {
     }
 
     pub fn file_attr(&self) -> io::Result<FileAttr> {
-        let mut stat = fstat(self.fd())?;
-        // The VFS server does not copy the stat payload yet; synthesize the
-        // size via `lseek` so `Metadata::len()` works.
-        if stat.st_mode == 0 && stat.st_size == 0 {
-            let cur = lseek(self.fd(), 0, syscall::SEEK_CUR).ok();
-            if let Ok(size) = lseek(self.fd(), 0, syscall::SEEK_END) {
-                stat.st_size = size as i64;
-                stat.st_mode = S_IFREG;
-                if let Some(cur) = cur {
-                    let _ = lseek(self.fd(), cur as i64, syscall::SEEK_SET);
-                }
-            }
-        }
-        Ok(FileAttr::from_stat(stat))
+        Ok(FileAttr::from_stat(fstat(self.fd())?))
     }
 
     pub fn fsync(&self) -> io::Result<()> {
@@ -652,7 +650,9 @@ impl File {
     }
 
     pub fn duplicate(&self) -> io::Result<File> {
-        unsupported()
+        let fd = minix_std::fs::fcntl(self.fd(), syscall::F_DUPFD, 0).map_err(minix_err)?;
+        // SAFETY: `fd` is a freshly duplicated, owned descriptor.
+        Ok(File { inner: unsafe { FileDesc::from_raw_fd(fd) } })
     }
 
     pub fn set_permissions(&self, perm: FilePermissions) -> io::Result<()> {
@@ -662,6 +662,8 @@ impl File {
     }
 
     pub fn set_times(&self, _times: FileTimes) -> io::Result<()> {
+        // VFS's `do_utimens` only resolves a path, so there is no way to set
+        // the times of an open descriptor. Refuse instead of pretending.
         unsupported()
     }
 }
@@ -710,24 +712,49 @@ pub fn unlink(p: &Path) -> io::Result<()> {
     minix_std::fs::unlink(bytes).map_err(minix_err)
 }
 
-pub fn rename(_old: &Path, _new: &Path) -> io::Result<()> {
-    unsupported()
+pub fn rename(old: &Path, new: &Path) -> io::Result<()> {
+    let old = old.as_os_str().as_encoded_bytes();
+    let new = new.as_os_str().as_encoded_bytes();
+    minix_std::fs::rename(old, new).map_err(minix_err)
 }
 
-pub fn set_perm(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
-    unsupported()
+pub fn set_perm(p: &Path, perm: FilePermissions) -> io::Result<()> {
+    let path = p.as_os_str().as_encoded_bytes();
+    // `Permissions::mode()` is the raw `st_mode` when it came from metadata;
+    // chmod sets only the permission bits (setuid, setgid, sticky and rwx).
+    minix_std::fs::chmod(path, perm.mode() & 0o7777).map_err(minix_err)
 }
 
-pub fn set_perm_nofollow(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
-    unsupported()
+pub fn set_perm_nofollow(p: &Path, perm: FilePermissions) -> io::Result<()> {
+    // VFS has no lchmod, so `chmod` follows the final symlink. Refuse the one
+    // case where following would change a different file than the caller
+    // named, and let every other path through.
+    let path = p.as_os_str().as_encoded_bytes();
+    if lstat_bytes(path)?.st_mode & S_IFMT == S_IFLNK {
+        return Err(crate::sys::unsupported_err());
+    }
+    set_perm(p, perm)
 }
 
-pub fn set_times(_p: &Path, _times: FileTimes) -> io::Result<()> {
-    unsupported()
+pub fn set_times(p: &Path, times: FileTimes) -> io::Result<()> {
+    set_times_impl(p, &times, true)
 }
 
-pub fn set_times_nofollow(_p: &Path, _times: FileTimes) -> io::Result<()> {
-    unsupported()
+pub fn set_times_nofollow(p: &Path, times: FileTimes) -> io::Result<()> {
+    set_times_impl(p, &times, false)
+}
+
+fn set_times_impl(p: &Path, times: &FileTimes, follow: bool) -> io::Result<()> {
+    let path = p.as_os_str().as_encoded_bytes();
+    // VFS rejects `AT_SYMLINK_NOFOLLOW`, so the times of a symlink itself
+    // cannot be set. Refuse rather than stamping the link's target.
+    if !follow && lstat_bytes(path)?.st_mode & S_IFMT == S_IFLNK {
+        return Err(crate::sys::unsupported_err());
+    }
+    let (atime, ansec) = times.accessed.map_or((0, minix_std::fs::UTIME_OMIT), |t| t.as_epoch());
+    let (mtime, mnsec) = times.modified.map_or((0, minix_std::fs::UTIME_OMIT), |t| t.as_epoch());
+    // SAFETY: `path` is a valid byte slice in the caller's address space.
+    unsafe { minix_std::fs::utime(path, atime, mtime, ansec, mnsec) }.map_err(minix_err)
 }
 
 pub fn rmdir(p: &Path) -> io::Result<()> {
@@ -791,14 +818,13 @@ pub fn link(src: &Path, dst: &Path) -> io::Result<()> {
 }
 
 pub fn stat(p: &Path) -> io::Result<FileAttr> {
-    let mut opts = OpenOptions::new();
-    opts.read(true);
-    let file = File::open(p, &opts)?;
-    file.file_attr()
+    let path = p.as_os_str().as_encoded_bytes();
+    Ok(FileAttr::from_stat(stat_bytes(path)?))
 }
 
 pub fn lstat(p: &Path) -> io::Result<FileAttr> {
-    stat(p)
+    let path = p.as_os_str().as_encoded_bytes();
+    Ok(FileAttr::from_stat(lstat_bytes(path)?))
 }
 
 pub fn canonicalize(_p: &Path) -> io::Result<PathBuf> {

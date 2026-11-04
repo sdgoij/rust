@@ -51,6 +51,11 @@ impl SystemTime {
         SystemTime(Duration::from_secs(secs))
     }
 
+    /// Seconds and nanoseconds since the Unix epoch.
+    pub fn as_epoch(&self) -> (i64, i64) {
+        (self.0.as_secs() as i64, self.0.subsec_nanos() as i64)
+    }
+
     pub fn sub_time(&self, other: &SystemTime) -> Result<Duration, Duration> {
         self.0.checked_sub(other.0).ok_or_else(|| other.0 - self.0)
     }
