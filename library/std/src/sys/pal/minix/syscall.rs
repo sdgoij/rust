@@ -10,14 +10,9 @@
 pub use minix_rt::{exit, getpid, read};
 pub use minix_std::fs::Stat;
 
-/// Open flags (from `minix/include/fcntl.h`).
-pub const O_RDONLY: i32 = 0o00;
-pub const O_WRONLY: i32 = 0o01;
-pub const O_RDWR: i32 = 0o02;
-pub const O_CREAT: i32 = 0o100;
-pub const O_EXCL: i32 = 0o200;
-pub const O_TRUNC: i32 = 0o1000;
-pub const O_APPEND: i32 = 0o2000;
+/// Open flags, re-exported from `minix_std::fs` so the PAL and the userspace
+/// crate cannot drift apart. They are MINIX 3.3.0's `sys/sys/fcntl.h` values.
+pub use minix_std::fs::{O_APPEND, O_CREAT, O_EXCL, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 
 /// Seek whence values (from `minix/include/unistd.h`).
 pub const SEEK_SET: i32 = 0;
