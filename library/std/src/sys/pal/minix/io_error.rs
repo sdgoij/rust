@@ -4,8 +4,15 @@ use crate::fmt;
 use crate::io;
 use crate::sys::syscall;
 
+/// The most recent error, which on this port is the C library's.
+///
+/// std's own syscalls report a negative return rather than reading a slot, but
+/// `last_os_error()` is what a caller uses after a *C library* call, and those
+/// set the errno `minix_std` and `minix-libc` share
+/// (`__errno_location`). This used to answer 0 unconditionally, so every such
+/// failure printed as "Unknown error 0".
 pub fn errno() -> io::RawOsError {
-    0
+    minix_std::errno()
 }
 
 pub fn is_interrupted(_code: io::RawOsError) -> bool {
