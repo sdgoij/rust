@@ -207,15 +207,10 @@ pub struct ReadDir {
     filled: usize,
 }
 
-/// A directory entry as returned by `getdents`:
-/// `d_ino (u32), d_rec_len (u16), d_name_len (u8), d_file_type (u8), d_name`.
-#[repr(C)]
-struct MinixDirent {
-    d_ino: u32,
-    d_rec_len: u16,
-    d_name_len: u8,
-    d_file_type: u8,
-}
+/// A directory entry as `getdents` returns it: `d_fileno (u64), d_reclen (u16),
+/// d_namlen (u16), d_type (u8), d_name` — the layout MFS writes
+/// (`crates/fs/src/mfs/protect.rs`) and `minix-libc`'s `readdir` parses.
+const DIRENT_NAME_OFF: usize = 13;
 
 pub struct DirEntry {
     dir: crate::sync::Arc<InnerReadDir>,
@@ -377,39 +372,40 @@ impl Iterator for ReadDir {
                 }
             }
 
-            let entry = &self.buf[self.pos..];
-            if entry.len() < size_of::<MinixDirent>() {
+            let entry = &self.buf[self.pos..self.filled];
+            if entry.len() < DIRENT_NAME_OFF {
                 // Truncated entry; ask for more data.
                 self.pos = self.filled;
                 continue;
             }
-            let dirent = MinixDirent {
-                d_ino: u32::from_ne_bytes(entry[0..4].try_into().unwrap()),
-                d_rec_len: u16::from_ne_bytes(entry[4..6].try_into().unwrap()),
-                d_name_len: entry[6],
-                d_file_type: entry[7],
-            };
-            let rec_len = dirent.d_rec_len as usize;
-            if dirent.d_rec_len == 0 || rec_len < size_of::<MinixDirent>() {
-                self.pos = self.filled;
-                continue;
-            }
-            let name_len = dirent.d_name_len as usize;
-            if rec_len < size_of::<MinixDirent>() + name_len {
+            let ino = u64::from_ne_bytes(entry[0..8].try_into().unwrap());
+            let rec_len = u16::from_ne_bytes(entry[8..10].try_into().unwrap()) as usize;
+            let name_len = u16::from_ne_bytes(entry[10..12].try_into().unwrap()) as usize;
+            let type_ = entry[12];
+            if rec_len < DIRENT_NAME_OFF
+                || rec_len > entry.len()
+                || DIRENT_NAME_OFF + name_len > rec_len
+            {
                 self.pos = self.filled;
                 continue;
             }
             self.pos += rec_len;
-            if dirent.d_ino == 0 {
+            if ino == 0 {
                 continue;
             }
-            let name = &entry[size_of::<MinixDirent>()..size_of::<MinixDirent>() + name_len];
+            let name = &entry[DIRENT_NAME_OFF..DIRENT_NAME_OFF + name_len];
+            // std's `read_dir` contract omits `.` and `..`; MFS returns them, so
+            // filter here. A walker such as `walkdir` would otherwise descend into
+            // `.` forever.
+            if name == b"." || name == b".." {
+                continue;
+            }
             // SAFETY: directory entry names are byte strings without interior NULs.
             let name = unsafe { OsString::from_encoded_bytes_unchecked(name.to_vec()) };
             return Some(Ok(DirEntry {
                 dir: crate::sync::Arc::clone(&self.inner),
-                type_: dirent.d_file_type,
-                ino: dirent.d_ino as u64,
+                type_,
+                ino,
                 name,
             }));
         }
@@ -436,7 +432,15 @@ impl DirEntry {
     }
 
     pub fn file_type(&self) -> io::Result<FileType> {
-        Ok(FileType { mode: dir_type_to_mode(self.type_) })
+        let mode = dir_type_to_mode(self.type_);
+        if mode != 0 {
+            return Ok(FileType { mode });
+        }
+        // `DT_UNKNOWN`: MFS writes 0 for every entry rather than the inode's
+        // class, so ask the inode. Callers such as `walkdir` decide whether to
+        // descend from this answer, so answering "no class" would silently
+        // stop a recursive walk at the first entry.
+        lstat(&self.path()).map(|attr| attr.file_type())
     }
 }
 
