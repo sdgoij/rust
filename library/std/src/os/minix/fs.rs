@@ -111,6 +111,31 @@ pub trait MetadataExt {
     /// The number of blocks the file occupies, in 512-byte units.
     #[stable(feature = "minix_os", since = "1.100.0")]
     fn blocks(&self) -> u64;
+
+    /// The last access time, in whole seconds. The port's `stat` carries no
+    /// sub-second field, so [`atime_nsec`](MetadataExt::atime_nsec) is 0.
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn atime(&self) -> i64;
+
+    /// The nanoseconds part of the last access time, always 0 here.
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn atime_nsec(&self) -> i64;
+
+    /// The last modification time, in whole seconds.
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn mtime(&self) -> i64;
+
+    /// The nanoseconds part of the last modification time, always 0 here.
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn mtime_nsec(&self) -> i64;
+
+    /// The last status-change time, in whole seconds.
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn ctime(&self) -> i64;
+
+    /// The nanoseconds part of the last status-change time, always 0 here.
+    #[stable(feature = "minix_os", since = "1.100.0")]
+    fn ctime_nsec(&self) -> i64;
 }
 
 #[stable(feature = "minix_os", since = "1.100.0")]
@@ -153,6 +178,30 @@ impl MetadataExt for Metadata {
 
     fn blocks(&self) -> u64 {
         self.as_inner().blocks()
+    }
+
+    fn atime(&self) -> i64 {
+        self.as_inner().atime()
+    }
+
+    fn atime_nsec(&self) -> i64 {
+        self.as_inner().atime_nsec()
+    }
+
+    fn mtime(&self) -> i64 {
+        self.as_inner().mtime()
+    }
+
+    fn mtime_nsec(&self) -> i64 {
+        self.as_inner().mtime_nsec()
+    }
+
+    fn ctime(&self) -> i64 {
+        self.as_inner().ctime()
+    }
+
+    fn ctime_nsec(&self) -> i64 {
+        self.as_inner().ctime_nsec()
     }
 }
 

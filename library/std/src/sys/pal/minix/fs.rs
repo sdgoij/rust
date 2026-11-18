@@ -164,6 +164,34 @@ impl FileAttr {
     pub fn blocks(&self) -> u64 {
         self.stat.st_blocks.max(0) as u64
     }
+
+    /// Last access time, in whole seconds: the port's `stat` carries no
+    /// sub-second field, so every `*_nsec` answer below is 0.
+    pub fn atime(&self) -> i64 {
+        self.stat.st_atime
+    }
+
+    pub fn atime_nsec(&self) -> i64 {
+        0
+    }
+
+    /// Last modification time, in whole seconds.
+    pub fn mtime(&self) -> i64 {
+        self.stat.st_mtime
+    }
+
+    pub fn mtime_nsec(&self) -> i64 {
+        0
+    }
+
+    /// Last status-change time, in whole seconds.
+    pub fn ctime(&self) -> i64 {
+        self.stat.st_ctime
+    }
+
+    pub fn ctime_nsec(&self) -> i64 {
+        0
+    }
 }
 
 // all DirEntry's will have a reference to this struct
