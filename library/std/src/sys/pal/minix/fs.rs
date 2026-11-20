@@ -512,8 +512,24 @@ impl OpenOptions {
     fn get_creation_mode(&self) -> io::Result<i32> {
         match (self.write, self.append) {
             (true, false) => {}
-            _ => return Ok(0),
+            (false, false) => {
+                if self.truncate || self.create || self.create_new {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "creating or truncating a file requires write or append access",
+                    ));
+                }
+            }
+            (_, true) => {
+                if self.truncate && !self.create_new {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "append and truncate cannot both be enabled",
+                    ));
+                }
+            }
         }
+
         Ok(match (self.create, self.truncate, self.create_new) {
             (false, false, false) => 0,
             (true, false, false) => syscall::O_CREAT,
